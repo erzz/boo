@@ -17,7 +17,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/sean-erswell-liljefelt/boo/internal/state"
+	"github.com/erzz/boo/internal/state"
 )
 
 // Project is a single registered project.

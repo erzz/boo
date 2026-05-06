@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sean-erswell-liljefelt/boo/internal/project"
+	"github.com/erzz/boo/internal/project"
 )
 
 func newRmCmd() *cobra.Command {

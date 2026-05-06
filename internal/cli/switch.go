@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sean-erswell-liljefelt/boo/internal/ghostty"
-	"github.com/sean-erswell-liljefelt/boo/internal/project"
+	"github.com/erzz/boo/internal/ghostty"
+	"github.com/erzz/boo/internal/project"
 )
 
 // runRoot dispatches the bare 'boo' / 'boo <name>' invocation.

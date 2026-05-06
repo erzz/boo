@@ -1,4 +1,4 @@
-module github.com/sean-erswell-liljefelt/boo
+module github.com/erzz/boo
 
 go 1.26.2
 

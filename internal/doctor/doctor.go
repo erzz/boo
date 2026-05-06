@@ -13,7 +13,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sean-erswell-liljefelt/boo/internal/ghostty"
+	"github.com/erzz/boo/internal/ghostty"
 )
 
 // Status represents the outcome of a single check.

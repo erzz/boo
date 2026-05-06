@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	booexec "github.com/sean-erswell-liljefelt/boo/internal/exec"
+	booexec "github.com/erzz/boo/internal/exec"
 )
 
 func TestVersion_ParsesJSON(t *testing.T) {

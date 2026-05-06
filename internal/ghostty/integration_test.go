@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	booexec "github.com/sean-erswell-liljefelt/boo/internal/exec"
+	booexec "github.com/erzz/boo/internal/exec"
 )
 
 func skipIfNotMac(t *testing.T) {

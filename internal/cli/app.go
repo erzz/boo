@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	booexec "github.com/sean-erswell-liljefelt/boo/internal/exec"
-	"github.com/sean-erswell-liljefelt/boo/internal/ghostty"
-	"github.com/sean-erswell-liljefelt/boo/internal/state"
+	booexec "github.com/erzz/boo/internal/exec"
+	"github.com/erzz/boo/internal/ghostty"
+	"github.com/erzz/boo/internal/state"
 )
 
 // app is the shared dependency bundle for cobra commands.

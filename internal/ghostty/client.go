@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	booexec "github.com/sean-erswell-liljefelt/boo/internal/exec"
+	booexec "github.com/erzz/boo/internal/exec"
 )
 
 //go:embed jxa/version.js

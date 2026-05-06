@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sean-erswell-liljefelt/boo/internal/layout"
-	"github.com/sean-erswell-liljefelt/boo/internal/state"
+	"github.com/erzz/boo/internal/layout"
+	"github.com/erzz/boo/internal/state"
 )
 
 // Runtime is the per-project state captured between invocations.

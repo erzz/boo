@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/sean-erswell-liljefelt/boo/internal/cli"
+	"github.com/erzz/boo/internal/cli"
 )
 
 func main() {

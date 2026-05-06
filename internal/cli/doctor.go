@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	booexec "github.com/sean-erswell-liljefelt/boo/internal/exec"
-	"github.com/sean-erswell-liljefelt/boo/internal/doctor"
-	"github.com/sean-erswell-liljefelt/boo/internal/ghostty"
+	booexec "github.com/erzz/boo/internal/exec"
+	"github.com/erzz/boo/internal/doctor"
+	"github.com/erzz/boo/internal/ghostty"
 )
 
 func newDoctorCmd() *cobra.Command {
