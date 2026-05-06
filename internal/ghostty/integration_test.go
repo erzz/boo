@@ -75,6 +75,44 @@ func TestIntegration_OpenWindow(t *testing.T) {
 	t.Logf("opened window: %s (close manually if it lingers)", res.WindowID)
 }
 
+// TestIntegration_OpenLayout_MultiTabWithSplits exercises the Phase 2 layout
+// pipeline end-to-end: a window with two tabs, one of which has a split.
+// Cleanup closes the window so we don't leave windows around for the user.
+func TestIntegration_OpenLayout_MultiTabWithSplits(t *testing.T) {
+	skipIfNotMac(t)
+	guardAgainstSelfTermination(t)
+	c := newRealClient()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	res, err := c.OpenLayout(ctx, OpenLayoutParams{
+		Tabs: []LayoutTab{
+			{Name: "edit", Splits: []LayoutSplit{
+				{WorkingDirectory: "/tmp"},
+			}},
+			{Name: "run", Splits: []LayoutSplit{
+				{WorkingDirectory: "/tmp"},
+				{Direction: "right", WorkingDirectory: "/tmp"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenLayout: %v", err)
+	}
+	if res.WindowID == "" {
+		t.Fatal("expected non-empty windowId")
+	}
+	t.Logf("opened layout window %s", res.WindowID)
+	t.Cleanup(func() { _ = c.CloseWindow(ctx, res.WindowID) })
+
+	exists, err := c.WindowExists(ctx, res.WindowID)
+	if err != nil {
+		t.Fatalf("WindowExists: %v", err)
+	}
+	if !exists {
+		t.Fatalf("expected window %s to exist", res.WindowID)
+	}
+}
 // TestIntegration_OpenFocusCloseRoundTrip exercises the full lifecycle: open
 // a window, verify it exists, focus it, close it, verify it no longer exists.
 func TestIntegration_OpenFocusCloseRoundTrip(t *testing.T) {

@@ -71,3 +71,65 @@ func TestOpenWindow_PassesParamsAsStdinJSON(t *testing.T) {
 		t.Fatalf("stdin missing env: %s", got)
 	}
 }
+
+func TestOpenLayout_PassesLayoutAsStdinJSON(t *testing.T) {
+	var seenStdin []byte
+	fake := booexec.NewFake(func(_ string, _ []string, stdin []byte) ([]byte, []byte, error) {
+		seenStdin = stdin
+		return []byte(`{"windowId":"win-9"}`), nil, nil
+	})
+	c := New(fake)
+	res, err := c.OpenLayout(context.Background(), OpenLayoutParams{
+		Tabs: []LayoutTab{
+			{Name: "edit", Splits: []LayoutSplit{
+				{WorkingDirectory: "/projA", Command: "nvim ."},
+			}},
+			{Name: "run", Splits: []LayoutSplit{
+				{WorkingDirectory: "/projA"},
+				{Direction: "right", WorkingDirectory: "/projA", Command: "npm run dev"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenLayout: %v", err)
+	}
+	if res.WindowID != "win-9" {
+		t.Fatalf("windowId: got %q", res.WindowID)
+	}
+	got := string(seenStdin)
+	for _, want := range []string{
+		`"name":"edit"`,
+		`"name":"run"`,
+		`"direction":"right"`,
+		`"command":"npm run dev"`,
+		`"workingDirectory":"/projA"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stdin missing %s\nfull: %s", want, got)
+		}
+	}
+}
+
+func TestOpenLayout_RejectsEmptyTabs(t *testing.T) {
+	fake := booexec.NewFake(func(_ string, _ []string, _ []byte) ([]byte, []byte, error) {
+		t.Fatal("runner should not be invoked for empty tabs")
+		return nil, nil, nil
+	})
+	c := New(fake)
+	if _, err := c.OpenLayout(context.Background(), OpenLayoutParams{}); err == nil {
+		t.Fatal("expected error for empty tabs")
+	}
+}
+
+func TestOpenLayout_PropagatesScriptError(t *testing.T) {
+	fake := booexec.NewFake(func(_ string, _ []string, _ []byte) ([]byte, []byte, error) {
+		return []byte(`{"error":"non-primary split missing direction (tab 0 split 1)"}`), nil, nil
+	})
+	c := New(fake)
+	_, err := c.OpenLayout(context.Background(), OpenLayoutParams{
+		Tabs: []LayoutTab{{Splits: []LayoutSplit{{}, {}}}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing direction") {
+		t.Fatalf("expected propagated error, got %v", err)
+	}
+}

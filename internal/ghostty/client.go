@@ -35,6 +35,9 @@ var focusWindowScript string
 //go:embed jxa/close_window.js
 var closeWindowScript string
 
+//go:embed jxa/open_layout.js
+var openLayoutScript string
+
 // Client controls a running Ghostty instance.
 type Client struct {
 	runner booexec.Runner
@@ -181,6 +184,66 @@ func (c *Client) FocusWindow(ctx context.Context, windowID string) error {
 		return fmt.Errorf("ghostty focus window: unexpected response %q", stdout)
 	}
 	return nil
+}
+
+// LayoutSplit is one terminal surface in a layout being rendered.
+//
+// Direction is empty for the primary split of each tab and one of
+// "right"|"left"|"up"|"down" for subsequent splits. WorkingDirectory is the
+// already-resolved absolute path; layout-relative resolution happens in the
+// caller.
+type LayoutSplit struct {
+	Direction        string            `json:"direction,omitempty"`
+	WorkingDirectory string            `json:"workingDirectory,omitempty"`
+	Command          string            `json:"command,omitempty"`
+	InitialInput     string            `json:"initialInput,omitempty"`
+	Env              map[string]string `json:"env,omitempty"`
+}
+
+// LayoutTab is one tab in a layout being rendered.
+type LayoutTab struct {
+	Name   string        `json:"name,omitempty"`
+	Splits []LayoutSplit `json:"splits"`
+}
+
+// OpenLayoutParams is the input for OpenLayout. Tabs is rendered left-to-right
+// with the first split of the first tab seeding the new window.
+type OpenLayoutParams struct {
+	Tabs []LayoutTab `json:"tabs"`
+}
+
+// OpenLayout opens a new Ghostty window and renders the given multi-tab,
+// multi-split layout into it. Returns the new window's stable ID.
+//
+// On any failure after the window has been created, the JXA helper attempts
+// to close the partially-built window so we never leak state visible to the
+// user.
+func (c *Client) OpenLayout(ctx context.Context, p OpenLayoutParams) (*OpenWindowResult, error) {
+	if len(p.Tabs) == 0 {
+		return nil, errors.New("ghostty open layout: layout has no tabs")
+	}
+	stdin, err := json.Marshal(p)
+	if err != nil {
+		return nil, fmt.Errorf("ghostty open layout: encode params: %w", err)
+	}
+	stdout, stderr, err := c.run(ctx, openLayoutScript, stdin)
+	if err != nil {
+		return nil, fmt.Errorf("ghostty open layout: %w (stderr: %s)", err, stderr)
+	}
+	var out struct {
+		WindowID string `json:"windowId"`
+		Error    string `json:"error,omitempty"`
+	}
+	if jerr := json.Unmarshal(stdout, &out); jerr != nil {
+		return nil, fmt.Errorf("ghostty open layout: parse %q: %w", stdout, jerr)
+	}
+	if out.Error != "" {
+		return nil, errors.New(out.Error)
+	}
+	if out.WindowID == "" {
+		return nil, fmt.Errorf("ghostty open layout: empty windowId in response %q", stdout)
+	}
+	return &OpenWindowResult{WindowID: out.WindowID}, nil
 }
 
 // CloseWindow closes the window with the given ID. A window that no longer

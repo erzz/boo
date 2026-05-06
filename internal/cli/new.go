@@ -51,14 +51,15 @@ but not yet implemented).`,
 			}
 
 			// Resolve layout up-front so failure here doesn't leave half-state.
-			var l layout.Layout
-			switch layoutName {
-			case "", "default":
-				l = layout.Default()
-			default:
-				return fmt.Errorf("layout %q not found (Phase 1 ships only the built-in 'default' layout; user-defined layouts come in Phase 2)", layoutName)
+			// User templates in $XDG_CONFIG_HOME/boo/layouts/ shadow built-ins.
+			resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, layoutName)
+			if err != nil {
+				return err
 			}
-			l.Name = layoutName
+			l := resolved.Layout
+			if l.Name == "" {
+				l.Name = layoutName
+			}
 			if l.Name == "" {
 				l.Name = "default"
 			}

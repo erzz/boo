@@ -55,16 +55,15 @@ boo/
 ├── internal/
 │   ├── cli/                  # cobra command definitions
 │   ├── ghostty/              # JXA generation + osascript runner
+│   │   └── jxa/              # embedded JXA script templates
 │   ├── layout/               # layout model, TOML, validation
+│   │   └── templates/        # embedded built-in layout templates (default.toml, dev.toml)
 │   ├── project/              # project model, registry
 │   ├── state/                # XDG paths, atomic file IO
 │   ├── config/               # global config loader
 │   ├── picker/               # Bubble Tea TUI
 │   ├── doctor/               # environment checks
 │   └── exec/                 # Runner interface (real + fake) for testability
-├── assets/
-│   ├── layouts/              # bundled layout templates (default.toml, etc.)
-│   └── jxa/                  # JXA script templates
 ├── Makefile
 ├── go.mod
 ├── README.md

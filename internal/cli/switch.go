@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erzz/boo/internal/ghostty"
+	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/project"
 )
 
@@ -114,14 +115,27 @@ func openProjectWindow(ctx context.Context, a *app, p project.Project) (*ghostty
 	if err != nil {
 		return nil, err
 	}
-	// Phase 1 honours only the primary split of the first tab. Multi-tab and
-	// split rendering land in Phase 2.
-	primary := l.Tabs[0].Splits[0]
-	return a.Ghostty.OpenWindow(ctx, ghostty.OpenWindowParams{
-		WorkingDirectory: resolveLayoutCwd(p.Dir, primary.Cwd),
-		Command:          primary.Command,
-		Env:              primary.Env,
-	})
+	return a.Ghostty.OpenLayout(ctx, layoutToParams(p.Dir, l))
+}
+
+// layoutToParams projects a layout.Layout into the JSON shape OpenLayout
+// expects, resolving every split's cwd against the project root.
+func layoutToParams(projectDir string, l layout.Layout) ghostty.OpenLayoutParams {
+	tabs := make([]ghostty.LayoutTab, len(l.Tabs))
+	for i, t := range l.Tabs {
+		splits := make([]ghostty.LayoutSplit, len(t.Splits))
+		for j, s := range t.Splits {
+			splits[j] = ghostty.LayoutSplit{
+				Direction:        s.Direction,
+				WorkingDirectory: resolveLayoutCwd(projectDir, s.Cwd),
+				Command:          s.Command,
+				InitialInput:     s.InitialInput,
+				Env:              s.Env,
+			}
+		}
+		tabs[i] = ghostty.LayoutTab{Name: t.Name, Splits: splits}
+	}
+	return ghostty.OpenLayoutParams{Tabs: tabs}
 }
 
 func updateLaunchTime(a *app, name string, rt project.Runtime) error {
