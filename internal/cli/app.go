@@ -7,6 +7,7 @@ import (
 
 	booexec "github.com/erzz/boo/internal/exec"
 	"github.com/erzz/boo/internal/ghostty"
+	"github.com/erzz/boo/internal/git"
 	"github.com/erzz/boo/internal/state"
 )
 
@@ -19,6 +20,7 @@ type app struct {
 	Paths   state.Paths
 	Runner  booexec.Runner
 	Ghostty *ghostty.Client
+	Git     *git.Cloner
 }
 
 // newApp resolves paths and builds the default dependency set.
@@ -31,7 +33,7 @@ func newApp() (*app, error) {
 		return nil, err
 	}
 	r := booexec.NewReal()
-	return &app{Paths: p, Runner: r, Ghostty: ghostty.New(r)}, nil
+	return &app{Paths: p, Runner: r, Ghostty: ghostty.New(r), Git: git.New(r)}, nil
 }
 
 // resolveDir cleans and absolutises a user-supplied directory path. If empty,
@@ -60,4 +62,25 @@ func resolveDir(dir string) (string, error) {
 		return "", fmt.Errorf("%q is not a directory", clean)
 	}
 	return clean, nil
+}
+
+// resolveCloneDestination returns the absolute path a clone should target.
+//
+//   - If into is non-empty, it is absolutised and returned (existence and
+//     emptiness are validated by the cloner itself, not here).
+//   - Otherwise the destination is derived from the URL: <cwd>/<repo-name>,
+//     with .git stripped from the repo name.
+func resolveCloneDestination(into, url string) (string, error) {
+	if into != "" {
+		abs := into
+		if !filepath.IsAbs(abs) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return "", fmt.Errorf("resolve cwd: %w", err)
+			}
+			abs = filepath.Join(cwd, abs)
+		}
+		return filepath.Clean(abs), nil
+	}
+	return git.DeriveDestination("", url)
 }
