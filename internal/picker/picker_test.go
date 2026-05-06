@@ -1,0 +1,105 @@
+package picker
+
+import (
+	"testing"
+
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func newTestModel(items ...Item) *model {
+	listItems := make([]list.Item, len(items))
+	for i, it := range items {
+		listItems[i] = it
+	}
+	l := list.New(listItems, newDelegate(), 80, 24)
+	return &model{list: l}
+}
+
+func key(s string) tea.KeyMsg {
+	switch s {
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
+	case "q":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+}
+
+func TestModel_EnterSelectsCurrentItem(t *testing.T) {
+	m := newTestModel(
+		Item{Key: "alpha", Title: "alpha"},
+		Item{Key: "beta", Title: "beta"},
+	)
+	// First item is selected by default.
+	updated, _ := m.Update(key("enter"))
+	mm := updated.(*model)
+	if mm.selected != "alpha" {
+		t.Fatalf("expected alpha, got %q", mm.selected)
+	}
+	if mm.cancelled {
+		t.Fatal("should not be cancelled on enter")
+	}
+}
+
+func TestModel_DownThenEnterSelectsSecond(t *testing.T) {
+	m := newTestModel(
+		Item{Key: "alpha", Title: "alpha"},
+		Item{Key: "beta", Title: "beta"},
+	)
+	updated, _ := m.Update(key("down"))
+	updated, _ = updated.(*model).Update(key("enter"))
+	if got := updated.(*model).selected; got != "beta" {
+		t.Fatalf("expected beta, got %q", got)
+	}
+}
+
+func TestModel_QCancels(t *testing.T) {
+	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
+	updated, _ := m.Update(key("q"))
+	mm := updated.(*model)
+	if !mm.cancelled {
+		t.Fatal("expected cancelled")
+	}
+	if mm.selected != "" {
+		t.Fatalf("expected no selection, got %q", mm.selected)
+	}
+}
+
+func TestModel_EscCancels(t *testing.T) {
+	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
+	updated, _ := m.Update(key("esc"))
+	if !updated.(*model).cancelled {
+		t.Fatal("expected cancelled")
+	}
+}
+
+func TestModel_EmptyList_EnterDoesNothing(t *testing.T) {
+	m := newTestModel()
+	updated, cmd := m.Update(key("enter"))
+	mm := updated.(*model)
+	if mm.selected != "" {
+		t.Fatalf("expected no selection, got %q", mm.selected)
+	}
+	if mm.cancelled {
+		t.Fatal("should not be cancelled")
+	}
+	// Cmd may be nil; the important thing is no quit was issued with a selection.
+	_ = cmd
+}
+
+func TestRenderStatus(t *testing.T) {
+	// Just smoke: doesn't crash and returns non-empty for known statuses.
+	for _, s := range []string{"running", "stopped", "dir-missing", "anything-else"} {
+		if got := renderStatus(s); got == "" {
+			t.Errorf("renderStatus(%q) was empty", s)
+		}
+	}
+	if got := renderStatus(""); got != "" {
+		t.Errorf("renderStatus(\"\") = %q, want empty", got)
+	}
+}
