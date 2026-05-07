@@ -1,0 +1,9 @@
+# Code owners for boo.
+#
+# These owners are requested for review on every PR that touches a matching
+# path. Used by branch protection's "Require review from Code Owners" rule.
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repo.
+*       @erzz
