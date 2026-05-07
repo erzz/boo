@@ -103,3 +103,59 @@ func TestRenderStatus(t *testing.T) {
 		t.Errorf("renderStatus(\"\") = %q, want empty", got)
 	}
 }
+
+// Bare `boo` (list-first flows) must NEVER short-circuit to the
+// "this directory is already registered" interstitial. The interstitial
+// only answers the question "you asked to create a new project here,
+// but this dir already has one — switch or continue?", which is
+// nonsensical when the user just wants their project list.
+//
+// `boo new` and `boo save`'s form fallback (formOnly=true) DO want the
+// interstitial when a registered dir is detected, so the bare case
+// has to be selectively skipped without breaking those flows.
+//
+// This was a real regression: a previous implementation gated the
+// interstitial purely on AlreadyRegisteredAs being non-empty, which
+// meant bare `boo` from inside any registered dir hit the interstitial
+// before showing the list. Pin the precedence rule so it can't drift.
+func TestInitialScreen_BareBooSkipsInterstitial(t *testing.T) {
+	tests := []struct {
+		name                string
+		formOnly            bool
+		alreadyRegisteredAs string
+		want                screen
+	}{
+		{
+			name:                "bare boo in registered dir lands on the list",
+			formOnly:            false,
+			alreadyRegisteredAs: "alpha",
+			want:                screenList,
+		},
+		{
+			name:                "bare boo in unregistered dir lands on the list",
+			formOnly:            false,
+			alreadyRegisteredAs: "",
+			want:                screenList,
+		},
+		{
+			name:                "boo new in registered dir hits the interstitial",
+			formOnly:            true,
+			alreadyRegisteredAs: "alpha",
+			want:                screenAlreadyRegistered,
+		},
+		{
+			name:                "boo new in unregistered dir lands on the form",
+			formOnly:            true,
+			alreadyRegisteredAs: "",
+			want:                screenForm,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := initialScreen(tt.formOnly, tt.alreadyRegisteredAs); got != tt.want {
+				t.Errorf("initialScreen(formOnly=%v, alreadyRegisteredAs=%q) = %v, want %v",
+					tt.formOnly, tt.alreadyRegisteredAs, got, tt.want)
+			}
+		})
+	}
+}

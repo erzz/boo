@@ -109,21 +109,8 @@ func Run(items []Item, opts Options) (Result, error) {
 	form.preview = opts.PreviewTemplate
 	form.setLayoutNames(opts.LayoutNames)
 
-	scr := screenList
 	formOnly := opts.SkipListGoStraightToForm
-	// AlreadyRegistered is only meaningful when we were going to land on
-	// the form. The interstitial answers the question "you asked to
-	// create a new project here, but this dir already has one — switch
-	// or continue?". For list-first flows (bare `boo`) the list is
-	// exactly what the user wants; short-circuiting to the interstitial
-	// would be hostile (forcing them to press 'esc' just to see their
-	// own project list).
-	switch {
-	case formOnly && opts.Defaults.AlreadyRegisteredAs != "":
-		scr = screenAlreadyRegistered
-	case formOnly:
-		scr = screenForm
-	}
+	scr := initialScreen(formOnly, opts.Defaults.AlreadyRegisteredAs)
 
 	m := &model{
 		list:                l,
@@ -156,6 +143,29 @@ const (
 	screenForm
 	screenAlreadyRegistered
 )
+
+// initialScreen decides which sub-view to show when the picker starts.
+//
+// AlreadyRegistered is only meaningful when we were going to land on
+// the form. The interstitial answers the question "you asked to create
+// a new project here, but this dir already has one — switch or
+// continue?". For list-first flows (bare `boo`) the list is exactly
+// what the user wants; short-circuiting to the interstitial would be
+// hostile (forcing them to press 'esc' just to see their own project
+// list).
+//
+// Pulled out of Run() so the precedence rule is unit-testable without
+// spinning up a Bubble Tea program.
+func initialScreen(formOnly bool, alreadyRegisteredAs string) screen {
+	switch {
+	case formOnly && alreadyRegisteredAs != "":
+		return screenAlreadyRegistered
+	case formOnly:
+		return screenForm
+	default:
+		return screenList
+	}
+}
 
 type model struct {
 	list   list.Model

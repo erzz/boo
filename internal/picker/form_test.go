@@ -136,3 +136,71 @@ func TestForm_View_NoPreviewWhenCallbackNil(t *testing.T) {
 		t.Errorf("view should not render preview header without a callback:\n%s", out)
 	}
 }
+
+// Cycler defaults must not be silently overridden by a stale default
+// from upstream callers.
+//
+// Real regression caught in the YAML migration: `boo new` (no flags)
+// was preselecting `1x1x1` in the cycler instead of `triple`. Cause:
+// internal/cli/new.go set Template = "default" as a defensive fallback;
+// setLayoutNames searched the cycler list for "default", missed, and
+// fell back to layoutIdx=0 (alphabetical first = "1x1x1"). The
+// underlying textinput value was also stale ("default"), so even if
+// the user never touched the cycler, collect() would have submitted
+// "default" — not what was visible.
+//
+// Pin both halves of the contract:
+//
+//   - With Template="" (the post-fix state), the form starts with
+//     "triple" both in the underlying textinput and in the cycler,
+//     and collect() agrees.
+//   - With Template set to a name that ISN'T in the cycler list,
+//     setLayoutNames forces both the cycler index AND the underlying
+//     textinput value to a real cycler entry. The form must never
+//     submit a value the cycler isn't showing.
+
+func TestForm_NewFormModel_DefaultsTemplateInputToTriple(t *testing.T) {
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: ""})
+	if got := f.inputs[fieldTemplate].Value(); got != "triple" {
+		t.Errorf("template input = %q, want %q (mirrors collect() default; bug if these drift)", got, "triple")
+	}
+}
+
+func TestForm_SetLayoutNames_UnknownTemplateResetsToFirstAndOverwritesInput(t *testing.T) {
+	// Caller passes a stale template name that doesn't appear in the
+	// cycler list. The cycler must reset to index 0 AND the underlying
+	// textinput must be rewritten to match — otherwise collect() would
+	// later return the stale name, silently submitting a value the
+	// user never saw.
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "default"})
+	f.setLayoutNames([]string{"1x1x1", "1x2x1", "triple"})
+
+	if f.layoutIdx != 0 {
+		t.Errorf("layoutIdx = %d, want 0 (unknown template should reset cycler)", f.layoutIdx)
+	}
+	if got := f.inputs[fieldTemplate].Value(); got != "1x1x1" {
+		t.Errorf("template input = %q, want %q (must match cycler so collect() agrees)", got, "1x1x1")
+	}
+
+	intent, err := f.collect()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if intent.Template != "1x1x1" {
+		t.Errorf("intent.Template = %q, want %q (form must never submit a value the cycler isn't showing)", intent.Template, "1x1x1")
+	}
+}
+
+func TestForm_SetLayoutNames_KnownTemplatePreservesIndex(t *testing.T) {
+	// Sanity check the happy path: a template name that IS in the
+	// cycler list selects that entry and preserves the textinput value.
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "triple"})
+	f.setLayoutNames([]string{"1x1x1", "1x2x1", "triple"})
+
+	if f.layoutIdx != 2 {
+		t.Errorf("layoutIdx = %d, want 2 (cycler should land on 'triple')", f.layoutIdx)
+	}
+	if got := f.inputs[fieldTemplate].Value(); got != "triple" {
+		t.Errorf("template input = %q, want %q", got, "triple")
+	}
+}
