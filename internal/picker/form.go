@@ -34,6 +34,11 @@ type FormDefaults struct {
 	Template            string
 	GitRemote           string // informational only; rendered above the form
 	AlreadyRegisteredAs string
+	// DefaultLayout is the layout name used when Template is empty.
+	// Empty means "use the package's hardcoded fallback ('triple')".
+	// Wired by the CLI from user config so a user who sets
+	// default_layout in config.yaml sees that layout preselected.
+	DefaultLayout string
 }
 
 // formField is an index into the form's tab order.
@@ -89,6 +94,30 @@ type formModel struct {
 	// the Layout field stays a plain text input. See setLayoutNames.
 	layoutNames []string
 	layoutIdx   int
+
+	// defaultLayout is the template name to use when the Layout field
+	// is left blank at submit time and when the preview is requested
+	// without an explicit name. Set from FormDefaults.DefaultLayout
+	// (which the CLI populates from user config), falling back to
+	// hardcodedFallbackLayout.
+	defaultLayout string
+}
+
+// hardcodedFallbackLayout is the layout name the form uses when no
+// other source (caller-supplied DefaultLayout or user-typed Template)
+// has provided one. Last-resort fallback only — `boo` users who want
+// to change the default should set `default_layout:` in config.yaml,
+// which the CLI threads through FormDefaults.DefaultLayout.
+const hardcodedFallbackLayout = "triple"
+
+// effectiveDefault returns the layout name the form should treat as
+// "the default" — the value that pre-fills the Template input and is
+// used when the user submits with the field empty.
+func (d FormDefaults) effectiveDefault() string {
+	if d.DefaultLayout != "" {
+		return d.DefaultLayout
+	}
+	return hardcodedFallbackLayout
 }
 
 func newFormModel(d FormDefaults) formModel {
@@ -100,21 +129,23 @@ func newFormModel(d FormDefaults) formModel {
 		ti.CharLimit = 1024
 		return ti
 	}
+	def := d.effectiveDefault()
 	inputs := make([]textinput.Model, numFormFields)
 	inputs[fieldName] = mk("project-name", d.Name)
 	inputs[fieldDir] = mk("/path/to/dir", d.Dir)
 	inputs[fieldFrom] = mk("https://github.com/owner/repo (optional)", d.From)
 	tpl := d.Template
 	if tpl == "" {
-		tpl = "triple"
+		tpl = def
 	}
-	inputs[fieldTemplate] = mk("triple", tpl)
+	inputs[fieldTemplate] = mk(def, tpl)
 
 	inputs[fieldName].Focus()
 	return formModel{
-		inputs:    inputs,
-		focus:     fieldName,
-		gitRemote: d.GitRemote,
+		inputs:         inputs,
+		focus:          fieldName,
+		gitRemote:      d.GitRemote,
+		defaultLayout:  def,
 	}
 }
 
@@ -244,7 +275,10 @@ func (f *formModel) collect() (*NewProjectIntent, error) {
 	from := strings.TrimSpace(f.inputs[fieldFrom].Value())
 	tpl := strings.TrimSpace(f.inputs[fieldTemplate].Value())
 	if tpl == "" {
-		tpl = "triple"
+		tpl = f.defaultLayout
+		if tpl == "" {
+			tpl = hardcodedFallbackLayout
+		}
 	}
 	if name == "" {
 		return nil, fmt.Errorf("name is required")
@@ -344,7 +378,10 @@ func (f *formModel) view() string {
 	if f.preview != nil {
 		tpl := strings.TrimSpace(f.inputs[fieldTemplate].Value())
 		if tpl == "" {
-			tpl = "triple"
+			tpl = f.defaultLayout
+			if tpl == "" {
+				tpl = hardcodedFallbackLayout
+			}
 		}
 		if rendered := f.preview(tpl); rendered != "" {
 			b.WriteString("\n\n")

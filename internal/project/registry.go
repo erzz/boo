@@ -47,7 +47,8 @@ var nameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 // Refusing them keeps `boo <name>` unambiguous.
 var reservedNames = map[string]bool{
 	"doctor": true, "new": true, "list": true, "delete": true,
-	"save": true, "fzf": true, "layouts": true,
+	"save": true, "fzf": true, "layouts": true, "config": true,
+	"edit": true, "set-layout": true, "show": true,
 	"help": true, "completion": true,
 }
 
@@ -129,6 +130,19 @@ func (r *Registry) Remove(name string) error {
 		}
 	}
 	return fmt.Errorf("%w: %s", ErrNotFound, name)
+}
+
+// Update replaces the project entry with the same name as p. Returns
+// ErrNotFound if no such project is registered. Used by commands like
+// `boo set-layout` that mutate an existing project's metadata.
+func (r *Registry) Update(p Project) error {
+	for i, existing := range r.Projects {
+		if existing.Name == p.Name {
+			r.Projects[i] = p
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrNotFound, p.Name)
 }
 
 // FindByDir returns the project whose Dir matches dir exactly, or ErrNotFound.

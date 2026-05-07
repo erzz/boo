@@ -102,3 +102,58 @@ func TestFirstArg(t *testing.T) {
 		t.Errorf("[first second] → %q, want 'first'", got)
 	}
 }
+
+func TestDefaultsToIntent_AppliesDefaultLayoutWhenTemplateBlank(t *testing.T) {
+	// --yes path: no --layout flag, but config sets default_layout.
+	// The intent must carry the configured default through to
+	// runCreateProject so the user's preference is honoured even
+	// without the form.
+	d := picker.FormDefaults{
+		Name:          "alpha",
+		Dir:           "/x",
+		Template:      "",
+		DefaultLayout: "1x2x1",
+	}
+	got := defaultsToIntent(d)
+	if got.Template != "1x2x1" {
+		t.Errorf("Template = %q, want '1x2x1' (config default should win when --layout omitted)", got.Template)
+	}
+}
+
+func TestDefaultsToIntent_ExplicitTemplateBeatsDefault(t *testing.T) {
+	// Explicit --layout flag must always beat the configured default.
+	d := picker.FormDefaults{
+		Name:          "alpha",
+		Dir:           "/x",
+		Template:      "2x2x2",
+		DefaultLayout: "1x2x1",
+	}
+	got := defaultsToIntent(d)
+	if got.Template != "2x2x2" {
+		t.Errorf("Template = %q, want '2x2x2' (explicit --layout must beat config default)", got.Template)
+	}
+}
+
+func TestExpandRepoShorthand(t *testing.T) {
+	cases := []struct {
+		name          string
+		from          string
+		defaultRemote string
+		want          string
+	}{
+		{"empty from is unchanged", "", "https://github.com/erzz", ""},
+		{"empty remote leaves bare name unchanged", "myrepo", "", "myrepo"},
+		{"bare name expands", "myrepo", "https://github.com/erzz", "https://github.com/erzz/myrepo"},
+		{"trailing slash on remote is stripped", "myrepo", "https://github.com/erzz/", "https://github.com/erzz/myrepo"},
+		{"full https URL is unchanged", "https://github.com/owner/repo", "https://github.com/erzz", "https://github.com/owner/repo"},
+		{"SSH-style URL is unchanged", "git@github.com:owner/repo.git", "https://github.com/erzz", "git@github.com:owner/repo.git"},
+		{"path-containing input is unchanged (already qualified)", "owner/repo", "https://github.com/erzz", "owner/repo"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := expandRepoShorthand(c.from, c.defaultRemote); got != c.want {
+				t.Errorf("expandRepoShorthand(%q, %q) = %q, want %q", c.from, c.defaultRemote, got, c.want)
+			}
+		})
+	}
+}

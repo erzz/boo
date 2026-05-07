@@ -15,7 +15,7 @@ Go 1.24+, cobra (CLI), Bubble Tea + Lip Gloss + Bubbles (TUI), `sigs.k8s.io/yaml
 - `internal/layoutpreview/` — ASCII renderer for layout previews (used by `boo layouts` and the TUI form)
 - `internal/project/` — project model and registry CRUD
 - `internal/state/` — XDG paths, atomic file IO
-- `internal/config/` — global config loader
+- `internal/config/` — global config loader (YAML at `~/.config/boo/config.yaml`)
 - `internal/picker/` — Bubble Tea TUI (project list + new-project form with layout cycler)
 - `internal/doctor/` — environment checks
 - `internal/exec/` — `Runner` interface; production wraps `os/exec`, tests use fake
@@ -35,7 +35,7 @@ make fmt         # gofmt + goimports
 
 ## Conventions
 
-- Every shell-out goes through `internal/exec.Runner`. Documented exceptions: `internal/cli/fzf.go` (interactive TTY hand-off) and `git remote get-url` in the new-project flow. Anywhere else, calling `os/exec` directly breaks tests.
+- Every shell-out goes through `internal/exec.Runner`. Documented exceptions: `internal/cli/fzf.go` (interactive TTY hand-off), `git remote get-url` in the new-project flow, and `$EDITOR` invocations in `internal/cli/config.go` (`boo config edit`) and `internal/cli/edit.go` (`boo edit`). Anywhere else, calling `os/exec` directly breaks tests.
 - All Ghostty interaction lives in `internal/ghostty`. No JXA strings or `osascript` calls anywhere else.
 - **Layouts are YAML** (`sigs.k8s.io/yaml`). **Global config is TOML** (pelletier/go-toml v2). **JSON is internal-only** — state files and JXA stdin/stdout payloads.
 - Errors are wrapped with `fmt.Errorf("...: %w", err)`; user-facing errors come from a small set of helpers in `internal/cli` so messages stay consistent.

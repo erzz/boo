@@ -35,8 +35,8 @@ const (
 
 // ResolvedTemplate is a layout template plus where it was loaded from.
 //
-// Description is the leading-comment block from the source TOML
-// (extracted before parsing, since the TOML parser strips comments).
+// Description is the leading-comment block from the source YAML
+// (extracted before parsing, since the YAML parser strips comments).
 // It is purely template metadata for `boo layouts` and the new-project
 // preview — it is NOT carried into the runtime layout files written
 // per project. See extractDescription for the format we recognise.
@@ -103,7 +103,7 @@ func ResolveTemplate(layoutsDir, name string) (ResolvedTemplate, error) {
 }
 
 // extractDescription pulls a human-readable description out of the
-// leading comment block of a TOML template.
+// leading comment block of a YAML template.
 //
 // Rules:
 //   - Only consecutive lines from the very top of the file count.
@@ -193,7 +193,7 @@ func stripYAMLExt(filename string) (string, bool) {
 }
 
 // validTemplateName rejects path traversal and anything that isn't a plain
-// identifier. Templates live as `<name>.toml` inside layoutsDir or the
+// identifier. Templates live as `<name>.yaml` inside layoutsDir or the
 // embedded FS; we never want a "../foo" or "/etc/passwd" lookup to slip
 // through.
 func validTemplateName(name string) error {

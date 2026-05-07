@@ -70,6 +70,39 @@ func AllChecks(client *ghostty.Client) []CheckFunc {
 	}
 }
 
+// ConfigCheck returns a check that loads the user config at path and
+// reports whether it parses cleanly.
+//
+//   - File missing → SKIP ("using factory defaults").
+//   - File parses → OK.
+//   - File present but malformed → FAIL with the parse error and a
+//     pointer to `boo config edit` for the obvious next step.
+//
+// Wired separately from AllChecks because the doctor package shouldn't
+// depend on internal/config (it's a leaf package); the CLI assembles
+// the loader and passes a CheckFunc in.
+func ConfigCheck(path string, load func(path string) error) CheckFunc {
+	return func(_ context.Context, _ []Result) Result {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return Result{
+				Name:   "config",
+				Status: Skip,
+				Detail: "no config.yaml — using factory defaults",
+				Hint:   "run 'boo config edit' to create one",
+			}
+		}
+		if err := load(path); err != nil {
+			return Result{
+				Name:   "config",
+				Status: Fail,
+				Detail: err.Error(),
+				Hint:   "fix the YAML or run 'boo config edit' to inspect",
+			}
+		}
+		return Result{Name: "config", Status: OK, Detail: path}
+	}
+}
+
 // Run executes all checks in order and returns the results plus the worst
 // non-Skip status.
 func Run(ctx context.Context, checks []CheckFunc) ([]Result, Status) {

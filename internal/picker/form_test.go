@@ -204,3 +204,31 @@ func TestForm_SetLayoutNames_KnownTemplatePreservesIndex(t *testing.T) {
 		t.Errorf("template input = %q, want %q", got, "triple")
 	}
 }
+
+// FormDefaults.DefaultLayout lets the CLI thread the user's
+// `default_layout:` config value through to the form. With no
+// explicit Template, the form must preselect the configured default
+// (not the hardcoded fallback) so what the user sees matches what
+// they configured.
+func TestForm_DefaultLayout_FromConfigPreselectedWhenTemplateBlank(t *testing.T) {
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "", DefaultLayout: "1x2x1"})
+	if got := f.inputs[fieldTemplate].Value(); got != "1x2x1" {
+		t.Errorf("template input = %q, want %q (config default should preselect)", got, "1x2x1")
+	}
+	intent, err := f.collect()
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if intent.Template != "1x2x1" {
+		t.Errorf("intent.Template = %q, want %q", intent.Template, "1x2x1")
+	}
+}
+
+func TestForm_DefaultLayout_ExplicitTemplateBeatsConfigDefault(t *testing.T) {
+	// When --layout was passed AND config has a default_layout,
+	// the flag wins. (CLI passes flag value as Template.)
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "2x2x2", DefaultLayout: "1x2x1"})
+	if got := f.inputs[fieldTemplate].Value(); got != "2x2x2" {
+		t.Errorf("template input = %q, want %q (explicit Template should beat DefaultLayout)", got, "2x2x2")
+	}
+}

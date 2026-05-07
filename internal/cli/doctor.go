@@ -7,9 +7,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	booexec "github.com/erzz/boo/internal/exec"
+	"github.com/erzz/boo/internal/config"
 	"github.com/erzz/boo/internal/doctor"
+	booexec "github.com/erzz/boo/internal/exec"
 	"github.com/erzz/boo/internal/ghostty"
+	"github.com/erzz/boo/internal/state"
 )
 
 func newDoctorCmd() *cobra.Command {
@@ -23,7 +25,21 @@ func newDoctorCmd() *cobra.Command {
 			}
 			runner := booexec.NewReal()
 			client := ghostty.New(runner)
-			results, worst := doctor.Run(ctx, doctor.AllChecks(client))
+			// Doctor must run even if config is broken — it's the
+			// command users will reach for to diagnose that exact
+			// situation. Resolve paths directly (not via newApp,
+			// which would itself call config.Load and fail early).
+			paths, err := state.Default()
+			if err != nil {
+				return err
+			}
+			checks := append(doctor.AllChecks(client),
+				doctor.ConfigCheck(paths.ConfigFile, func(path string) error {
+					_, _, err := config.Load(path)
+					return err
+				}),
+			)
+			results, worst := doctor.Run(ctx, checks)
 			renderResults(cmd.OutOrStdout(), results)
 			if worst == doctor.Fail {
 				return fmt.Errorf("doctor: one or more checks failed")

@@ -43,8 +43,10 @@ Non-interactive use (scripting):
 When --from is given, --dir (or its alias --into) controls the clone destination;
 otherwise --dir points at an existing directory to register.
 
---yes skips the form and registers immediately. Without --yes, flags act as
-form pre-population and the user can edit before submitting.`,
+--yes skips the form and registers immediately. With no flags it falls
+back to the current directory (and any detected git remote), so
+'boo new --yes' inside a git repo registers it as-is. Without --yes,
+flags act as form pre-population and the user can edit before submitting.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			a, err := newApp()
@@ -112,7 +114,7 @@ form pre-population and the user can edit before submitting.`,
 	cmd.Flags().StringVar(&intoDir, "into", "", "directory to clone into (with --from); defaults to repo name in cwd")
 	cmd.Flags().StringVar(&existing, "dir", "", "existing directory to register")
 	cmd.Flags().StringVar(&layoutName, "layout", "", "layout template to use (default: 'triple')")
-	cmd.Flags().BoolVar(&yes, "yes", false, "skip the form and register immediately (requires --dir or --from)")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the form and register immediately (uses cwd if --dir/--from omitted)")
 	return cmd
 }
 
@@ -204,17 +206,26 @@ func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults,
 		Template:            template,
 		GitRemote:           gitRemote,
 		AlreadyRegisteredAs: alreadyAs,
+		DefaultLayout:       a.Config.DefaultLayoutOr("triple"),
 	}, nil
 }
 
 // defaultsToIntent converts a fully-specified set of defaults into an intent.
 // Used by --yes mode to skip the form when the caller has supplied enough.
+//
+// If Template was left blank (no --layout flag), we apply DefaultLayout
+// here so --yes honours the user's configured default. The form path
+// applies the same fallback inside collect().
 func defaultsToIntent(d picker.FormDefaults) *picker.NewProjectIntent {
+	tpl := d.Template
+	if tpl == "" {
+		tpl = d.DefaultLayout
+	}
 	return &picker.NewProjectIntent{
 		Name:     d.Name,
 		Dir:      d.Dir,
 		From:     d.From,
-		Template: d.Template,
+		Template: tpl,
 	}
 }
 
@@ -266,8 +277,13 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 	// Resolve directory.
 	var dir string
 	if intent.From != "" {
+		// Apply git default-remote shorthand expansion: a bare repo
+		// name like "boo" becomes "<git.default_remote>/boo". A full
+		// URL is left alone. See expandRepoShorthand for the rules.
+		intent.From = expandRepoShorthand(intent.From, a.Config.GitDefaultRemoteOr(""))
+
 		// Clone flow. If Dir was provided treat it as --into; otherwise
-		// derive from the URL relative to cwd.
+		// derive from the URL relative to projects_dir (or cwd).
 		if intent.Dir != "" {
 			abs, err := filepath.Abs(intent.Dir)
 			if err != nil {
@@ -275,7 +291,7 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 			}
 			dir = abs
 		} else {
-			dir, err = resolveCloneDestination("", intent.From)
+			dir, err = resolveCloneDestination("", intent.From, a.Config.ProjectsDirOr(""))
 			if err != nil {
 				return err
 			}

@@ -5,8 +5,8 @@
 // for portability:
 //
 //	$XDG_CONFIG_HOME/boo/   (default ~/.config/boo)
-//	  config.toml           — global config
-//	  layouts/*.toml        — user-defined shared layout templates
+//	  config.yaml           — global config
+//	  layouts/*.yaml        — user-defined shared layout templates
 //
 //	$XDG_DATA_HOME/boo/     (default ~/.local/share/boo)
 //	  projects.toml         — registry index
@@ -25,7 +25,7 @@ import (
 type Paths struct {
 	ConfigDir   string // ~/.config/boo
 	DataDir     string // ~/.local/share/boo
-	ConfigFile  string // ConfigDir/config.toml
+	ConfigFile  string // ConfigDir/config.yaml
 	LayoutsDir  string // ConfigDir/layouts
 	Registry    string // DataDir/projects.toml
 	ProjectsDir string // DataDir/projects
@@ -66,7 +66,7 @@ func forBase(configDir, dataDir string) Paths {
 	return Paths{
 		ConfigDir:   configDir,
 		DataDir:     dataDir,
-		ConfigFile:  filepath.Join(configDir, "config.toml"),
+		ConfigFile:  filepath.Join(configDir, "config.yaml"),
 		LayoutsDir:  filepath.Join(configDir, "layouts"),
 		Registry:    filepath.Join(dataDir, "projects.toml"),
 		ProjectsDir: filepath.Join(dataDir, "projects"),
@@ -76,6 +76,21 @@ func forBase(configDir, dataDir string) Paths {
 // ProjectDir returns the per-project state directory for the given name.
 func (p Paths) ProjectDir(name string) string {
 	return filepath.Join(p.ProjectsDir, name)
+}
+
+// ProjectLayoutFile returns the path to the per-project layout snapshot
+// (layout.yaml). Centralised so callers don't hard-code the filename in
+// multiple places — the on-disk name has changed once already (.toml →
+// .yaml) and may again.
+func (p Paths) ProjectLayoutFile(name string) string {
+	return filepath.Join(p.ProjectDir(name), "layout.yaml")
+}
+
+// ProjectStateFile returns the path to the per-project runtime state
+// file (state.json). Symmetric with ProjectLayoutFile so callers
+// (notably `boo show`) don't have to know the on-disk filename.
+func (p Paths) ProjectStateFile(name string) string {
+	return filepath.Join(p.ProjectDir(name), "state.json")
 }
 
 // EnsureDirs creates ConfigDir, DataDir, LayoutsDir, and ProjectsDir if they

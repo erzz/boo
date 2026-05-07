@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +15,8 @@ import (
 )
 
 func newListCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List registered projects",
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -26,6 +28,9 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				return renderListJSON(c.Context(), c.OutOrStdout(), a, reg.Projects)
+			}
 			if len(reg.Projects) == 0 {
 				_, _ = fmt.Fprintln(c.OutOrStdout(), "No projects registered. Run 'boo new <name> --dir <path>' to create one.")
 				return nil
@@ -34,6 +39,57 @@ func newListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON instead of the human table")
+	return cmd
+}
+
+// listJSONEntry is the per-project record emitted by `boo list --json`.
+// We keep this as an explicit type (rather than dumping project.Project
+// directly) so the wire format is decoupled from internal storage:
+// future changes to Project's struct layout don't silently change
+// what scripts see.
+type listJSONEntry struct {
+	Name           string    `json:"name"`
+	Dir            string    `json:"dir"`
+	Layout         string    `json:"layout"`
+	Status         string    `json:"status"`
+	WindowID       string    `json:"window_id,omitempty"`
+	LastLaunchedAt time.Time `json:"last_launched_at,omitempty"`
+	CreatedAt      time.Time `json:"created_at,omitempty"`
+}
+
+// renderListJSON prints the project list as a JSON array. Empty
+// registries emit `[]`, not null — easier to consume from jq or
+// languages whose unmarshallers reject null arrays.
+func renderListJSON(ctx context.Context, w io.Writer, a *app, projects []project.Project) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	out := make([]listJSONEntry, 0, len(projects))
+	for _, p := range projects {
+		rt, _ := project.LoadRuntime(a.Paths, p.Name)
+		status := "stopped"
+		switch {
+		case !dirExists(p.Dir):
+			status = "dir-missing"
+		case rt.WindowID != "":
+			if exists, err := a.Ghostty.WindowExists(ctx, rt.WindowID); err == nil && exists {
+				status = "running"
+			}
+		}
+		out = append(out, listJSONEntry{
+			Name:           p.Name,
+			Dir:            p.Dir,
+			Layout:         p.Layout,
+			Status:         status,
+			WindowID:       rt.WindowID,
+			LastLaunchedAt: rt.LastLaunchedAt,
+			CreatedAt:      p.CreatedAt,
+		})
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func renderList(ctx context.Context, w io.Writer, a *app, projects []project.Project) {

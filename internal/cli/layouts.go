@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -22,7 +23,7 @@ const previewWidth = 50
 // template (built-in + user) with its description and an ASCII preview.
 //
 // This is the primary discovery surface for the layout system. A user
-// who's never edited a TOML file should be able to run `boo layouts`,
+// who's never edited a YAML file should be able to run `boo layouts`,
 // see what shapes ship with boo, and pick one for `boo new --layout`.
 //
 // Output structure per template:
@@ -37,7 +38,8 @@ const previewWidth = 50
 // with the user version winning. We mark them [user] so it's obvious
 // which version the user is seeing.
 func newLayoutsCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "layouts",
 		Short: "List available layout templates with previews",
 		Long: `List every layout template available to 'boo new --layout', with
@@ -46,24 +48,83 @@ its description and an ASCII preview of the resulting window.
 Templates come from two places:
 
   - Built-in templates embedded in the boo binary.
-  - User templates in ~/.config/boo/layouts/<name>.toml.
+  - User templates in ~/.config/boo/layouts/<name>.yaml.
 
 User templates with the same name as a built-in shadow the built-in;
 this command lists each name once and marks the source as [user] when
 shadowed.
 
 Use 'boo new --layout <name>' to create a project with one of these
-layouts. To create a custom layout, drop a <name>.toml in
-~/.config/boo/layouts/ — see docs/layouts.md for the TOML reference.`,
+layouts. To create a custom layout, drop a <name>.yaml in
+~/.config/boo/layouts/ — see docs/layouts.md for the YAML reference.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			a, err := newApp()
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				return runLayoutsJSON(a, c.OutOrStdout())
+			}
 			return runLayouts(a, c.OutOrStdout())
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON instead of the human listing")
+	return cmd
+}
+
+// layoutsJSONEntry is the per-template record emitted by `boo layouts
+// --json`. The ASCII preview is omitted because it's purely a TTY
+// affordance — JSON consumers that want shape information should
+// inspect the layout structure directly via 'boo show' or by reading
+// the layout file.
+//
+// Error is set (and Source/Path/Description left zero) when a user
+// template fails to parse. The human listing surfaces these inline
+// with [error]; JSON consumers see the same information so a tool
+// can warn rather than silently dropping the broken template.
+type layoutsJSONEntry struct {
+	Name        string `json:"name"`
+	Source      string `json:"source,omitempty"` // "builtin" or "user"
+	Path        string `json:"path,omitempty"`
+	Description string `json:"description,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+func runLayoutsJSON(a *app, w io.Writer) error {
+	names, err := layout.ListTemplates(a.Paths.LayoutsDir)
+	if err != nil {
+		return fmt.Errorf("list layouts: %w", err)
+	}
+	sort.Strings(names)
+	out := make([]layoutsJSONEntry, 0, len(names))
+	for _, name := range names {
+		r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, name)
+		if err != nil {
+			// Mirror the human listing: surface broken
+			// templates rather than hiding them. Tools can
+			// detect a non-empty error field and flag the
+			// template for the user.
+			out = append(out, layoutsJSONEntry{
+				Name:  name,
+				Error: err.Error(),
+			})
+			continue
+		}
+		src := "builtin"
+		if r.Source == layout.SourceUser {
+			src = "user"
+		}
+		out = append(out, layoutsJSONEntry{
+			Name:        r.Layout.Name,
+			Source:      src,
+			Path:        r.Path,
+			Description: r.Description,
+		})
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 // runLayouts is the testable core of `boo layouts`. Extracted from

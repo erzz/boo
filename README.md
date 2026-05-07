@@ -9,8 +9,12 @@ boo projA          # open or focus the projA window
 boo                # fuzzy picker over all known projects
 boo new projA      # register a project (existing dir or clone from URL)
 boo save           # snapshot the focused window's layout for the current project
-boo list           # show all projects
+boo list           # show all projects (use --json to script)
+boo show projA     # everything boo knows about a project
+boo edit projA     # open a project's layout file in $EDITOR
+boo set-layout projA triple   # switch a project to a different layout template
 boo layouts        # preview every available layout template
+boo config         # show effective config + where each value came from
 boo doctor         # sanity-check your environment
 ```
 
@@ -22,7 +26,7 @@ Pre-alpha. Under active development. macOS only.
 
 boo drives Ghostty via its native AppleScript / JXA API. There is no tmux, no terminal multiplexer, no leaky abstraction — splits are Ghostty splits, scrollback is Ghostty scrollback, everything Ghostty does just works. Windows you opened with boo stay open across switches, so the processes inside them keep running.
 
-See [`docs/layouts.md`](./docs/layouts.md) for the layout YAML reference, the bundled built-ins, and copy-paste examples (Node, Go, Rust, Python). See [`docs/testing.md`](./docs/testing.md) for what CI runs and the manual smoke tests run before a release.
+See [`docs/layouts.md`](./docs/layouts.md) for the layout YAML reference, the bundled built-ins, and copy-paste examples (Node, Go, Rust, Python). See [`docs/config.md`](./docs/config.md) for the global config schema. See [`docs/testing.md`](./docs/testing.md) for what CI runs and the manual smoke tests run before a release.
 
 ## Requirements
 

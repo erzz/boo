@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/erzz/boo/internal/layout"
@@ -31,12 +30,12 @@ func SaveLayout(p state.Paths, name string, l layout.Layout) error {
 	if err != nil {
 		return err
 	}
-	return state.WriteAtomic(filepath.Join(p.ProjectDir(name), "layout.yaml"), data)
+	return state.WriteAtomic(p.ProjectLayoutFile(name), data)
 }
 
 // LoadLayout reads the resolved layout snapshot for project name.
 func LoadLayout(p state.Paths, name string) (layout.Layout, error) {
-	path := filepath.Join(p.ProjectDir(name), "layout.yaml")
+	path := p.ProjectLayoutFile(name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return layout.Layout{}, fmt.Errorf("project: read layout %s: %w", path, err)
@@ -47,7 +46,7 @@ func LoadLayout(p state.Paths, name string) (layout.Layout, error) {
 // LoadRuntime reads runtime state for project name. A missing file yields a
 // zero-value Runtime with no error.
 func LoadRuntime(p state.Paths, name string) (Runtime, error) {
-	path := filepath.Join(p.ProjectDir(name), "state.json")
+	path := p.ProjectStateFile(name)
 	data, err := state.ReadOrEmpty(path)
 	if err != nil {
 		return Runtime{}, err
@@ -71,7 +70,7 @@ func SaveRuntime(p state.Paths, name string, rt Runtime) error {
 	if err != nil {
 		return fmt.Errorf("project: marshal runtime: %w", err)
 	}
-	return state.WriteAtomic(filepath.Join(p.ProjectDir(name), "state.json"), data)
+	return state.WriteAtomic(p.ProjectStateFile(name), data)
 }
 
 // PurgeProjectDir removes the per-project state directory entirely. Used by

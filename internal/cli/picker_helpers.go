@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/layoutpreview"
 	"github.com/erzz/boo/internal/picker"
@@ -138,6 +140,12 @@ func buildPickerItems(ctx context.Context, a *app, projects []project.Project) [
 func pickViaFzf(ctx context.Context, items []picker.Item) (string, error) {
 	if _, err := exec.LookPath("fzf"); err != nil {
 		return "", errors.New("fzf is not on $PATH (install fzf, or run 'boo' for the built-in picker)")
+	}
+	// fzf needs a real TTY for its UI. If we're not attached to one
+	// (script, pipe, CI), fzf will silently hang waiting for keystrokes
+	// it can never receive. Fail fast with a clear message instead.
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return "", errors.New("boo fzf needs a terminal for fzf's UI (stdout isn't a TTY)")
 	}
 
 	var input strings.Builder
