@@ -111,11 +111,15 @@ func Run(items []Item, opts Options) (Result, error) {
 
 	scr := screenList
 	formOnly := opts.SkipListGoStraightToForm
-	// AlreadyRegistered takes precedence over formOnly: if the caller already
-	// knows the dir is registered, the user needs to see the switch/continue
-	// prompt, not blunder into a form that will fail on submit.
+	// AlreadyRegistered is only meaningful when we were going to land on
+	// the form. The interstitial answers the question "you asked to
+	// create a new project here, but this dir already has one — switch
+	// or continue?". For list-first flows (bare `boo`) the list is
+	// exactly what the user wants; short-circuiting to the interstitial
+	// would be hostile (forcing them to press 'esc' just to see their
+	// own project list).
 	switch {
-	case opts.Defaults.AlreadyRegisteredAs != "":
+	case formOnly && opts.Defaults.AlreadyRegisteredAs != "":
 		scr = screenAlreadyRegistered
 	case formOnly:
 		scr = screenForm
@@ -312,8 +316,8 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 			cursor = "▌ "
 			titleS = newProjectFocus
 		}
-		fmt.Fprintln(w, cursor+titleS.Render("+ New project"))
-		fmt.Fprint(w, "    "+newProjectFooter.Render("press enter to register a project"))
+		_, _ = fmt.Fprintln(w, cursor+titleS.Render("+ New project"))
+		_, _ = fmt.Fprint(w, "    "+newProjectFooter.Render("press enter to register a project"))
 		return
 	}
 
@@ -335,8 +339,8 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		first += "   " + trailingStyle.Render(it.Trailing)
 	}
 	second := "    " + descS.Render(it.Description)
-	fmt.Fprintln(w, first)
-	fmt.Fprint(w, second)
+	_, _ = fmt.Fprintln(w, first)
+	_, _ = fmt.Fprint(w, second)
 }
 
 func renderStatus(s string) string {

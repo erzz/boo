@@ -27,7 +27,7 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 			if len(reg.Projects) == 0 {
-				fmt.Fprintln(c.OutOrStdout(), "No projects registered. Run 'boo new <name> --dir <path>' to create one.")
+				_, _ = fmt.Fprintln(c.OutOrStdout(), "No projects registered. Run 'boo new <name> --dir <path>' to create one.")
 				return nil
 			}
 			renderList(c.Context(), c.OutOrStdout(), a, reg.Projects)
@@ -41,7 +41,7 @@ func renderList(ctx context.Context, w io.Writer, a *app, projects []project.Pro
 		ctx = context.Background()
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tDIR\tSTATUS\tLAST LAUNCHED")
+	_, _ = fmt.Fprintln(tw, "NAME\tDIR\tSTATUS\tLAST LAUNCHED")
 	for _, p := range projects {
 		rt, _ := project.LoadRuntime(a.Paths, p.Name) // missing → zero
 		status := "stopped"
@@ -57,7 +57,7 @@ func renderList(ctx context.Context, w io.Writer, a *app, projects []project.Pro
 		if !rt.LastLaunchedAt.IsZero() {
 			last = humanAge(rt.LastLaunchedAt)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.Name, p.Dir, status, last)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.Name, p.Dir, status, last)
 	}
 	_ = tw.Flush()
 }

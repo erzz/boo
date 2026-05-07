@@ -25,20 +25,20 @@ func renderDiff(d SaveDiff, w io.Writer) {
 	if d.Outcome == OutcomeLossy {
 		header = "Layout will change (some data CANNOT be recovered, marked with !):"
 	}
-	fmt.Fprintln(w, header)
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, header)
+	_, _ = fmt.Fprintln(w)
 
 	for _, td := range d.ChangedTabs {
-		fmt.Fprintln(w, renderTabDiff(td))
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, renderTabDiff(td))
+		_, _ = fmt.Fprintln(w)
 	}
 
 	if len(d.LossReasons) > 0 {
-		fmt.Fprintln(w, "Unrecoverable on next save:")
+		_, _ = fmt.Fprintln(w, "Unrecoverable on next save:")
 		for _, r := range d.LossReasons {
-			fmt.Fprintf(w, "  - %s\n", r)
+			_, _ = fmt.Fprintf(w, "  - %s\n", r)
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
 
 	// Structural and lossy outcomes both deserve the limitation
@@ -51,22 +51,22 @@ func renderDiff(d SaveDiff, w io.Writer) {
 	// into a right-chain row and that flattening shows up as a
 	// structural change. Silent saves stay silent — we never reached
 	// this branch anyway.
-	fmt.Fprintln(w, "Why this happens:")
-	fmt.Fprintln(w, "  Ghostty's AppleScript API returns a flat list of terminals per")
-	fmt.Fprintln(w, "  tab — it does not expose split direction, nesting, or the")
-	fmt.Fprintln(w, "  command/env that launched a terminal. boo can reopen the same")
-	fmt.Fprintln(w, "  number of panes with the same cwds, but if the captured pane")
-	fmt.Fprintln(w, "  count differs from the previous layout the tree will be flattened")
-	fmt.Fprintln(w, "  into a right-leaning row, and any field marked '!' above will be")
-	fmt.Fprintln(w, "  dropped.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Recommended:")
-	fmt.Fprintln(w, "  If you rely on a specific tree shape, command, or env, write a")
-	fmt.Fprintln(w, "  layout YAML by hand and use it via 'boo new --layout <name>' or")
-	fmt.Fprintln(w, "  by editing the project's layout.yaml directly. Hand-authored")
-	fmt.Fprintln(w, "  layouts are reapplied verbatim on every launch — and survive")
-	fmt.Fprintln(w, "  re-saves intact when the captured pane count matches.")
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Why this happens:")
+	_, _ = fmt.Fprintln(w, "  Ghostty's AppleScript API returns a flat list of terminals per")
+	_, _ = fmt.Fprintln(w, "  tab — it does not expose split direction, nesting, or the")
+	_, _ = fmt.Fprintln(w, "  command/env that launched a terminal. boo can reopen the same")
+	_, _ = fmt.Fprintln(w, "  number of panes with the same cwds, but if the captured pane")
+	_, _ = fmt.Fprintln(w, "  count differs from the previous layout the tree will be flattened")
+	_, _ = fmt.Fprintln(w, "  into a right-leaning row, and any field marked '!' above will be")
+	_, _ = fmt.Fprintln(w, "  dropped.")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Recommended:")
+	_, _ = fmt.Fprintln(w, "  If you rely on a specific tree shape, command, or env, write a")
+	_, _ = fmt.Fprintln(w, "  layout YAML by hand and use it via 'boo new --layout <name>' or")
+	_, _ = fmt.Fprintln(w, "  by editing the project's layout.yaml directly. Hand-authored")
+	_, _ = fmt.Fprintln(w, "  layouts are reapplied verbatim on every launch — and survive")
+	_, _ = fmt.Fprintln(w, "  re-saves intact when the captured pane count matches.")
+	_, _ = fmt.Fprintln(w)
 }
 
 // renderTabDiff returns a multi-line string showing one tab side-by-side
@@ -82,7 +82,7 @@ func renderTabDiff(td TabDiff) string {
 	title := fmt.Sprintf("Tab %d %s", td.Index, quotedOrEmpty(td.Name))
 
 	var b strings.Builder
-	fmt.Fprintln(&b, title)
+	_, _ = fmt.Fprintln(&b, title)
 
 	leftLines := strings.Split(left, "\n")
 	rightLines := strings.Split(right, "\n")
@@ -100,7 +100,7 @@ func renderTabDiff(td TabDiff) string {
 		if i == middleLine(maxLines) {
 			arrow = "→ "
 		}
-		fmt.Fprintf(&b, "%s   %s%s\n", padRight(l, leftWidth), arrow, r)
+		_, _ = fmt.Fprintf(&b, "%s   %s%s\n", padRight(l, leftWidth), arrow, r)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

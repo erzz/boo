@@ -74,7 +74,7 @@ You will be asked to confirm; pass --force to skip the prompt.`,
 						return err
 					}
 					if !ok {
-						fmt.Fprintln(c.OutOrStdout(), "Aborted.")
+						_, _ = fmt.Fprintln(c.OutOrStdout(), "Aborted.")
 						return nil
 					}
 				}
@@ -83,7 +83,7 @@ You will be asked to confirm; pass --force to skip the prompt.`,
 					rt, err := project.LoadRuntime(a.Paths, p.Name)
 					if err == nil && rt.WindowID != "" {
 						if err := a.Ghostty.CloseWindow(c.Context(), rt.WindowID); err != nil {
-							fmt.Fprintf(c.ErrOrStderr(), "warning: could not close window %s: %v\n", rt.WindowID, err)
+							_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: could not close window %s: %v\n", rt.WindowID, err)
 						}
 					}
 				}
@@ -96,9 +96,9 @@ You will be asked to confirm; pass --force to skip the prompt.`,
 				}
 				if err := project.PurgeProjectDir(a.Paths, p.Name); err != nil {
 					// Registry is already updated; report but don't fail.
-					fmt.Fprintf(c.ErrOrStderr(), "warning: removed from registry but could not purge state dir: %v\n", err)
+					_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: removed from registry but could not purge state dir: %v\n", err)
 				}
-				fmt.Fprintf(c.OutOrStdout(), "Deleted project %q (source dir %s left untouched)\n", p.Name, p.Dir)
+				_, _ = fmt.Fprintf(c.OutOrStdout(), "Deleted project %q (source dir %s left untouched)\n", p.Name, p.Dir)
 				return nil
 			})
 		},
@@ -137,13 +137,13 @@ func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 // will and won't be touched. Empty input or anything other than y/yes counts
 // as "no", so an accidental Enter is safe.
 func confirmDelete(in io.Reader, out io.Writer, name, dir string, purge bool) (bool, error) {
-	fmt.Fprintf(out, "Delete project %q?\n", name)
-	fmt.Fprintf(out, "  registry entry + state will be removed\n")
-	fmt.Fprintf(out, "  source dir %s will NOT be touched\n", dir)
+	_, _ = fmt.Fprintf(out, "Delete project %q?\n", name)
+	_, _ = fmt.Fprintf(out, "  registry entry + state will be removed\n")
+	_, _ = fmt.Fprintf(out, "  source dir %s will NOT be touched\n", dir)
 	if purge {
-		fmt.Fprintf(out, "  any open Ghostty window will be closed\n")
+		_, _ = fmt.Fprintf(out, "  any open Ghostty window will be closed\n")
 	}
-	fmt.Fprintf(out, "Type 'y' to confirm: ")
+	_, _ = fmt.Fprintf(out, "Type 'y' to confirm: ")
 
 	r := bufio.NewReader(in)
 	line, err := r.ReadString('\n')

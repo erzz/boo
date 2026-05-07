@@ -96,12 +96,12 @@ still printed to stderr under --force so audit logs show what was lost.`,
 				switch {
 				case match.project != nil:
 					p = *match.project
-					fmt.Fprintf(c.OutOrStdout(), "Detected project %q from focused Ghostty window.\n", p.Name)
+					_, _ = fmt.Fprintf(c.OutOrStdout(), "Detected project %q from focused Ghostty window.\n", p.Name)
 				case match.unregisteredCwd != "":
 					// Front Ghostty window exists but no registered project owns
 					// it. Treat as "register what I'm in" and hand over to the
 					// new-project flow seeded with the window's cwd.
-					fmt.Fprintf(c.OutOrStdout(), "Focused Ghostty window isn't a registered project — opening the new-project form.\n")
+					_, _ = fmt.Fprintf(c.OutOrStdout(), "Focused Ghostty window isn't a registered project — opening the new-project form.\n")
 					defs, err := buildNewProjectDefaults(a, defaultsFromFlags{dir: match.unregisteredCwd})
 					if err != nil {
 						return err
@@ -153,9 +153,9 @@ still printed to stderr under --force so audit logs show what was lost.`,
 			for _, t := range newLayout.Tabs {
 				leaves += len(collectLeaves(t.Root))
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Captured %d tab(s), %d pane(s) from window %s\n", tabs, leaves, rt.WindowID)
+			_, _ = fmt.Fprintf(c.OutOrStdout(), "Captured %d tab(s), %d pane(s) from window %s\n", tabs, leaves, rt.WindowID)
 			for _, w := range warnings {
-				fmt.Fprintf(c.ErrOrStderr(), "warning: %s\n", w)
+				_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: %s\n", w)
 			}
 
 			// Compare against the previously-saved layout so we only nag the
@@ -179,7 +179,7 @@ still printed to stderr under --force so audit logs show what was lost.`,
 			case errors.Is(perr, fs.ErrNotExist):
 				// First save — nothing to compare against.
 			case isLayoutParseError(perr):
-				fmt.Fprintf(c.ErrOrStderr(), "warning: previous layout file is unreadable (%v) — proceeding as a fresh save.\n", perr)
+				_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: previous layout file is unreadable (%v) — proceeding as a fresh save.\n", perr)
 			default:
 				return fmt.Errorf("read previous layout (refusing to overwrite): %w", perr)
 			}
@@ -212,14 +212,14 @@ still printed to stderr under --force so audit logs show what was lost.`,
 				return err
 			}
 			if !proceed {
-				fmt.Fprintln(c.OutOrStdout(), "aborted")
+				_, _ = fmt.Fprintln(c.OutOrStdout(), "aborted")
 				return nil
 			}
 
 			if err := project.SaveLayout(a.Paths, p.Name, merged); err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved layout for %q.\n", p.Name)
+			_, _ = fmt.Fprintf(c.OutOrStdout(), "Saved layout for %q.\n", p.Name)
 			return nil
 		},
 	}

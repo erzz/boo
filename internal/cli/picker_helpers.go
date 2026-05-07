@@ -45,7 +45,7 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	// registry is empty, tell the user and bail; otherwise hand off.
 	if mode == pickerFzf {
 		if len(reg.Projects) == 0 {
-			fmt.Fprintln(out, "No projects registered. Run 'boo new' to create one.")
+			_, _ = fmt.Fprintln(out, "No projects registered. Run 'boo new' to create one.")
 			return nil
 		}
 		items := buildPickerItems(ctx, a, reg.Projects)

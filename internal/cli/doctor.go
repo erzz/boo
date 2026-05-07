@@ -35,9 +35,9 @@ func newDoctorCmd() *cobra.Command {
 
 func renderResults(w io.Writer, results []doctor.Result) {
 	for _, r := range results {
-		fmt.Fprintf(w, "[%s] %s — %s\n", r.Status, r.Name, r.Detail)
+		_, _ = fmt.Fprintf(w, "[%s] %s — %s\n", r.Status, r.Name, r.Detail)
 		if r.Hint != "" {
-			fmt.Fprintf(w, "       hint: %s\n", r.Hint)
+			_, _ = fmt.Fprintf(w, "       hint: %s\n", r.Hint)
 		}
 	}
 }

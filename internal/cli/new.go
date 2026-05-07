@@ -111,7 +111,7 @@ form pre-population and the user can edit before submitting.`,
 	cmd.Flags().StringVar(&fromURL, "from", "", "git URL to clone from")
 	cmd.Flags().StringVar(&intoDir, "into", "", "directory to clone into (with --from); defaults to repo name in cwd")
 	cmd.Flags().StringVar(&existing, "dir", "", "existing directory to register")
-	cmd.Flags().StringVar(&layoutName, "layout", "", "layout template to use (default: 'default')")
+	cmd.Flags().StringVar(&layoutName, "layout", "", "layout template to use (default: 'triple')")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the form and register immediately (requires --dir or --from)")
 	return cmd
 }
@@ -138,7 +138,7 @@ type defaultsFromFlags struct {
 //
 //   - flags win
 //   - then: cwd inspection (basename, git remote)
-//   - then: hard-coded defaults ("default" template)
+//   - then: hard-coded defaults (form supplies "triple" when blank)
 //
 // AlreadyRegisteredAs is filled when the resolved Dir matches an existing
 // registered project — the TUI then prompts "switch or continue?".
@@ -191,10 +191,11 @@ func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults,
 		}
 	}
 
+	// When no --layout was given, leave Template empty here. The form
+	// (newFormModel) supplies its own default ("triple"); duplicating it
+	// here would mean the migration has to update two places every time
+	// the default changes. Single source of truth lives in the form.
 	template := strings.TrimSpace(fl.template)
-	if template == "" {
-		template = "default"
-	}
 
 	return picker.FormDefaults{
 		Name:                name,
@@ -241,10 +242,10 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 	if err := project.ValidateName(intent.Name); err != nil {
 		return err
 	}
-	if intent.From != "" && intent.Dir != "" {
-		// Treat Dir as the clone destination ("into") rather than rejecting,
-		// so the TUI can pre-populate Dir from a derived clone destination.
-	}
+	// When both From and Dir are set we treat Dir as the clone destination
+	// ("into") rather than rejecting, so the TUI can pre-populate Dir from
+	// a derived clone destination. No special branch needed — the clone
+	// path below already does the right thing.
 	if intent.From == "" && intent.Dir == "" {
 		return errors.New("either Directory or Clone from URL is required")
 	}
@@ -282,7 +283,7 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 		if err := preCheckCollisions(a, intent.Name, dir); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Cloning %s into %s ...\n", intent.From, dir)
+		_, _ = fmt.Fprintf(out, "Cloning %s into %s ...\n", intent.From, dir)
 		cloned, err := a.Git.Clone(ctx, intent.From, dir)
 		if err != nil {
 			return err
@@ -327,7 +328,7 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 			_ = project.PurgeProjectDir(a.Paths, intent.Name)
 			return err
 		}
-		fmt.Fprintf(out, "Registered %q at %s (layout: %s)\n", intent.Name, dir, l.Name)
+		_, _ = fmt.Fprintf(out, "Registered %q at %s (layout: %s)\n", intent.Name, dir, l.Name)
 
 		// Auto-launch after creation. Matches the user expectation that
 		// "registering" a new project also opens it (mirrors the pre-form

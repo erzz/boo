@@ -84,7 +84,7 @@ func runLayouts(a *app, out io.Writer) error {
 
 	for i, name := range names {
 		if i > 0 {
-			fmt.Fprintln(out)
+			_, _ = fmt.Fprintln(out)
 		}
 		r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, name)
 		if err != nil {
@@ -92,7 +92,7 @@ func runLayouts(a *app, out io.Writer) error {
 			// listing — surface the error inline and keep going.
 			// This matches what a user expects: "show me what's
 			// here, including what's broken."
-			fmt.Fprintf(out, "%s    [error]\n  %v\n", name, err)
+			_, _ = fmt.Fprintf(out, "%s    [error]\n  %v\n", name, err)
 			continue
 		}
 		writeLayoutEntry(out, r)
@@ -118,20 +118,20 @@ func writeLayoutEntry(w io.Writer, r layout.ResolvedTemplate) {
 	if pad < 1 {
 		pad = 1
 	}
-	fmt.Fprintf(w, "%s%s%s\n", name, strings.Repeat(" ", pad), source)
-	fmt.Fprintf(w, "  %s\n", r.Path)
+	_, _ = fmt.Fprintf(w, "%s%s%s\n", name, strings.Repeat(" ", pad), source)
+	_, _ = fmt.Fprintf(w, "  %s\n", r.Path)
 
 	if r.Description != "" {
 		for _, line := range strings.Split(r.Description, "\n") {
-			fmt.Fprintf(w, "  %s\n", line)
+			_, _ = fmt.Fprintf(w, "  %s\n", line)
 		}
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	// Preview: indent each line by 2 spaces to group it visually
 	// with the metadata above.
 	preview := layoutpreview.RenderLayout(r.Layout, previewWidth)
 	for _, line := range strings.Split(preview, "\n") {
-		fmt.Fprintf(w, "  %s\n", line)
+		_, _ = fmt.Fprintf(w, "  %s\n", line)
 	}
 }

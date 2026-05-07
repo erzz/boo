@@ -4,8 +4,6 @@ package ghostty
 // so it can be unit tested without the integration build tag. Not exported —
 // only the test guard uses it.
 
-import "os"
-
 func detectGhosttyHost(env func(string) string) bool {
 	if env("GHOSTTY_RESOURCES_DIR") != "" {
 		return true
@@ -18,7 +16,3 @@ func detectGhosttyHost(env func(string) string) bool {
 	}
 	return false
 }
-
-// insideGhostty reports whether the current process is hosted in a Ghostty
-// terminal. See detectGhosttyHost for the signals.
-func insideGhostty() bool { return detectGhosttyHost(os.Getenv) }
