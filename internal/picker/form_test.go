@@ -6,7 +6,7 @@ import (
 )
 
 func TestForm_Collect_RequiresName(t *testing.T) {
-	f := newFormModel(FormDefaults{Dir: "/x"})
+	f := newFormModel(FormDefaults{Dir: "/x"}, defaultTheme())
 	f.inputs[fieldName].SetValue("  ")
 	if _, err := f.collect(); err == nil {
 		t.Fatal("expected error for empty name")
@@ -14,7 +14,7 @@ func TestForm_Collect_RequiresName(t *testing.T) {
 }
 
 func TestForm_Collect_RequiresDirOrFrom(t *testing.T) {
-	f := newFormModel(FormDefaults{Name: "alpha"})
+	f := newFormModel(FormDefaults{Name: "alpha"}, defaultTheme())
 	f.inputs[fieldDir].SetValue("")
 	f.inputs[fieldFrom].SetValue("")
 	if _, err := f.collect(); err == nil {
@@ -23,7 +23,7 @@ func TestForm_Collect_RequiresDirOrFrom(t *testing.T) {
 }
 
 func TestForm_Collect_DefaultsTemplateToDefault(t *testing.T) {
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: ""})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: ""}, defaultTheme())
 	f.inputs[fieldTemplate].SetValue("")
 	got, err := f.collect()
 	if err != nil {
@@ -35,7 +35,7 @@ func TestForm_Collect_DefaultsTemplateToDefault(t *testing.T) {
 }
 
 func TestForm_Collect_TrimsWhitespace(t *testing.T) {
-	f := newFormModel(FormDefaults{})
+	f := newFormModel(FormDefaults{}, defaultTheme())
 	f.inputs[fieldName].SetValue("  alpha  ")
 	f.inputs[fieldDir].SetValue("  /tmp/x  ")
 	f.inputs[fieldFrom].SetValue("  https://example/repo  ")
@@ -50,7 +50,7 @@ func TestForm_Collect_TrimsWhitespace(t *testing.T) {
 }
 
 func TestForm_FocusNextWraps(t *testing.T) {
-	f := newFormModel(FormDefaults{})
+	f := newFormModel(FormDefaults{}, defaultTheme())
 	if f.focus != fieldName {
 		t.Fatalf("initial focus = %d, want %d", f.focus, fieldName)
 	}
@@ -63,7 +63,7 @@ func TestForm_FocusNextWraps(t *testing.T) {
 }
 
 func TestForm_FocusPrevWraps(t *testing.T) {
-	f := newFormModel(FormDefaults{})
+	f := newFormModel(FormDefaults{}, defaultTheme())
 	f.focusPrev()
 	if f.focus != numFormFields-1 {
 		t.Errorf("focus after prev from 0 = %d, want %d", f.focus, numFormFields-1)
@@ -81,7 +81,7 @@ func TestForm_FocusPrevWraps(t *testing.T) {
 //     hostile, silence is the right default here
 
 func TestForm_View_RendersPreviewWhenCallbackReturnsContent(t *testing.T) {
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "dev"})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "dev"}, defaultTheme())
 	f.preview = func(name string) string {
 		if name != "dev" {
 			t.Errorf("preview called with %q, want %q", name, "dev")
@@ -98,7 +98,7 @@ func TestForm_View_RendersPreviewWhenCallbackReturnsContent(t *testing.T) {
 }
 
 func TestForm_View_HidesPreviewWhenCallbackReturnsEmpty(t *testing.T) {
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "nope"})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "nope"}, defaultTheme())
 	called := false
 	f.preview = func(name string) string {
 		called = true
@@ -114,7 +114,7 @@ func TestForm_View_HidesPreviewWhenCallbackReturnsEmpty(t *testing.T) {
 }
 
 func TestForm_View_PreviewDefaultsToDefaultWhenTemplateBlank(t *testing.T) {
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x"})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x"}, defaultTheme())
 	f.inputs[fieldTemplate].SetValue("")
 	got := ""
 	f.preview = func(name string) string {
@@ -130,7 +130,7 @@ func TestForm_View_PreviewDefaultsToDefaultWhenTemplateBlank(t *testing.T) {
 func TestForm_View_NoPreviewWhenCallbackNil(t *testing.T) {
 	// Most callers (delete, save) never wire a previewer. The form
 	// must still render cleanly with no preview block at all.
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "dev"})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "dev"}, defaultTheme())
 	out := f.view()
 	if strings.Contains(out, "Preview of layout") {
 		t.Errorf("view should not render preview header without a callback:\n%s", out)
@@ -160,7 +160,7 @@ func TestForm_View_NoPreviewWhenCallbackNil(t *testing.T) {
 //     submit a value the cycler isn't showing.
 
 func TestForm_NewFormModel_DefaultsTemplateInputToTriple(t *testing.T) {
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: ""})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: ""}, defaultTheme())
 	if got := f.inputs[fieldTemplate].Value(); got != "triple" {
 		t.Errorf("template input = %q, want %q (mirrors collect() default; bug if these drift)", got, "triple")
 	}
@@ -172,7 +172,7 @@ func TestForm_SetLayoutNames_UnknownTemplateResetsToFirstAndOverwritesInput(t *t
 	// textinput must be rewritten to match — otherwise collect() would
 	// later return the stale name, silently submitting a value the
 	// user never saw.
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "default"})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "default"}, defaultTheme())
 	f.setLayoutNames([]string{"1x1x1", "1x2x1", "triple"})
 
 	if f.layoutIdx != 0 {
@@ -194,7 +194,7 @@ func TestForm_SetLayoutNames_UnknownTemplateResetsToFirstAndOverwritesInput(t *t
 func TestForm_SetLayoutNames_KnownTemplatePreservesIndex(t *testing.T) {
 	// Sanity check the happy path: a template name that IS in the
 	// cycler list selects that entry and preserves the textinput value.
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "triple"})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "triple"}, defaultTheme())
 	f.setLayoutNames([]string{"1x1x1", "1x2x1", "triple"})
 
 	if f.layoutIdx != 2 {
@@ -211,7 +211,7 @@ func TestForm_SetLayoutNames_KnownTemplatePreservesIndex(t *testing.T) {
 // (not the hardcoded fallback) so what the user sees matches what
 // they configured.
 func TestForm_DefaultLayout_FromConfigPreselectedWhenTemplateBlank(t *testing.T) {
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "", DefaultLayout: "1x2x1"})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "", DefaultLayout: "1x2x1"}, defaultTheme())
 	if got := f.inputs[fieldTemplate].Value(); got != "1x2x1" {
 		t.Errorf("template input = %q, want %q (config default should preselect)", got, "1x2x1")
 	}
@@ -227,7 +227,7 @@ func TestForm_DefaultLayout_FromConfigPreselectedWhenTemplateBlank(t *testing.T)
 func TestForm_DefaultLayout_ExplicitTemplateBeatsConfigDefault(t *testing.T) {
 	// When --layout was passed AND config has a default_layout,
 	// the flag wins. (CLI passes flag value as Template.)
-	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "2x2x2", DefaultLayout: "1x2x1"})
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "2x2x2", DefaultLayout: "1x2x1"}, defaultTheme())
 	if got := f.inputs[fieldTemplate].Value(); got != "2x2x2" {
 		t.Errorf("template input = %q, want %q (explicit Template should beat DefaultLayout)", got, "2x2x2")
 	}

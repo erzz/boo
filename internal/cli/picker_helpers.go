@@ -81,6 +81,7 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		Defaults:        defs,
 		PreviewTemplate: templatePreviewer(a),
 		LayoutNames:     templateNames(a),
+		Theme:           a.Config.ThemeOr("default"),
 	})
 	if err != nil {
 		return err
@@ -88,14 +89,18 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	if res.Cancelled() {
 		return nil
 	}
-	if res.NewProject != nil {
-		return runCreateProject(ctx, a, *res.NewProject, out)
+	switch v := res.Intent.(type) {
+	case picker.NewProjectIntent:
+		return runCreateProject(ctx, a, v, out)
+	case picker.SwitchIntent:
+		p, err := reg.Get(v.Name)
+		if err != nil {
+			return err
+		}
+		return switchToProject(ctx, a, p)
+	default:
+		return fmt.Errorf("picker: unexpected intent %T", v)
 	}
-	p, err := reg.Get(res.Selected)
-	if err != nil {
-		return err
-	}
-	return switchToProject(ctx, a, p)
 }
 
 // buildPickerItems mirrors the status/last-launched columns from `boo list`

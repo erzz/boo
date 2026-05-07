@@ -113,14 +113,19 @@ still printed to stderr under --force so audit logs show what was lost.`,
 						HideNewProject:           true,
 						PreviewTemplate:          templatePreviewer(a),
 						LayoutNames:              templateNames(a),
+						Theme:                    a.Config.ThemeOr("default"),
 					})
 					if err != nil {
 						return err
 					}
-					if res.Cancelled() || res.NewProject == nil {
+					if res.Cancelled() {
 						return nil
 					}
-					return runCreateProject(c.Context(), a, *res.NewProject, c.OutOrStdout())
+					npi, ok := res.Intent.(picker.NewProjectIntent)
+					if !ok {
+						return nil
+					}
+					return runCreateProject(c.Context(), a, npi, c.OutOrStdout())
 				}
 			}
 

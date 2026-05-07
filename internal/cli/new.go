@@ -85,6 +85,7 @@ flags act as form pre-population and the user can edit before submitting.`,
 				SkipListGoStraightToForm: true,
 				PreviewTemplate:          templatePreviewer(a),
 				LayoutNames:              templateNames(a),
+				Theme:                    a.Config.ThemeOr("default"),
 			})
 			if err != nil {
 				return err
@@ -96,18 +97,22 @@ flags act as form pre-population and the user can edit before submitting.`,
 			// AlreadyRegistered prompt — but in form-only mode we never show
 			// that prompt, so this branch shouldn't fire. Handle it safely
 			// regardless.
-			if res.Selected != "" {
+			switch v := res.Intent.(type) {
+			case picker.SwitchIntent:
 				p, err := project.Load(a.Paths)
 				if err != nil {
 					return err
 				}
-				pr, err := p.Get(res.Selected)
+				pr, err := p.Get(v.Name)
 				if err != nil {
 					return err
 				}
 				return switchToProject(c.Context(), a, pr)
+			case picker.NewProjectIntent:
+				return runCreateProject(c.Context(), a, v, c.OutOrStdout())
+			default:
+				return fmt.Errorf("picker: unexpected intent %T", v)
 			}
-			return runCreateProject(c.Context(), a, *res.NewProject, c.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&fromURL, "from", "", "git URL to clone from")

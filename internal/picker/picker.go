@@ -14,7 +14,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Item is one row in the picker.
@@ -34,15 +33,42 @@ type newProjectItem struct{}
 
 func (newProjectItem) FilterValue() string { return "+ New project" }
 
-// Result describes what the user did. At most one of Selected and NewProject
-// is populated; if neither is set the user cancelled.
+// Intent is the sealed sum type of "what the user wants to do next" returned
+// by Run. CLI code dispatches on the concrete type via a type switch.
+//
+// New intents are added as new struct types implementing isIntent(). The
+// interface is sealed (unexported method) so external packages can't add
+// variants and break the exhaustive switches in CLI dispatch code.
+type Intent interface{ isIntent() }
+
+// SwitchIntent — user picked an existing project from the list.
+type SwitchIntent struct{ Name string }
+
+// NewProjectIntent — user submitted the new-project form. The CLI turns
+// this into the actual registry/clone work.
+//
+// Exactly one of Dir or From is meaningful at submit time:
+//
+//   - If From is non-empty, the project will be created by cloning into Dir
+//     (Dir defaults to a sibling of cwd named after the repo).
+//   - Otherwise Dir is the existing directory to register.
+type NewProjectIntent struct {
+	Name     string
+	Dir      string
+	From     string
+	Template string
+}
+
+func (SwitchIntent) isIntent()     {}
+func (NewProjectIntent) isIntent() {}
+
+// Result describes what the user did. A nil Intent means the user cancelled.
 type Result struct {
-	Selected   string
-	NewProject *NewProjectIntent
+	Intent Intent
 }
 
 // Cancelled reports whether the user dismissed the UI without choosing.
-func (r Result) Cancelled() bool { return r.Selected == "" && r.NewProject == nil }
+func (r Result) Cancelled() bool { return r.Intent == nil }
 
 // Options configures Run.
 type Options struct {
@@ -75,6 +101,10 @@ type Options struct {
 	// Empty = back to the legacy free-text input. Useful for tests and
 	// for any future caller that wants the old behaviour.
 	LayoutNames []string
+	// Theme selects a named visual theme. Empty or unknown names fall
+	// back to the built-in default. The CLI populates this from the
+	// `ui.theme` config key.
+	Theme string
 }
 
 // Run shows the TUI and blocks until the user makes a decision.
@@ -82,6 +112,8 @@ type Options struct {
 // Renders to stderr so command output redirected via stdout doesn't get
 // mangled and the alt-screen restore at exit is clean.
 func Run(items []Item, opts Options) (Result, error) {
+	theme, _ := ThemeByName(opts.Theme)
+
 	listItems := make([]list.Item, 0, len(items)+1)
 	for _, it := range items {
 		listItems = append(listItems, it)
@@ -90,7 +122,7 @@ func Run(items []Item, opts Options) (Result, error) {
 		listItems = append(listItems, newProjectItem{})
 	}
 
-	l := list.New(listItems, newDelegate(), 0, 0)
+	l := list.New(listItems, newDelegate(theme), 0, 0)
 	title := opts.Title
 	if title == "" {
 		title = "boo — projects"
@@ -99,13 +131,13 @@ func Run(items []Item, opts Options) (Result, error) {
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(true)
 	l.SetFilteringEnabled(true)
-	l.Styles.Title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
+	l.Styles.Title = theme.ListTitle
 	if !opts.HideNewProject {
 		l.AdditionalShortHelpKeys = shortKeys
 		l.AdditionalFullHelpKeys = shortKeys
 	}
 
-	form := newFormModel(opts.Defaults)
+	form := newFormModel(opts.Defaults, theme)
 	form.preview = opts.PreviewTemplate
 	form.setLayoutNames(opts.LayoutNames)
 
@@ -115,6 +147,7 @@ func Run(items []Item, opts Options) (Result, error) {
 	m := &model{
 		list:                l,
 		form:                form,
+		theme:               theme,
 		screen:              scr,
 		formOnly:            formOnly,
 		hideNewProject:      opts.HideNewProject,
@@ -129,10 +162,7 @@ func Run(items []Item, opts Options) (Result, error) {
 	if mm.cancelled {
 		return Result{}, nil
 	}
-	if mm.intent != nil {
-		return Result{NewProject: mm.intent}, nil
-	}
-	return Result{Selected: mm.selected}, nil
+	return Result{Intent: mm.intent}, nil
 }
 
 // screen identifies the active sub-view.
@@ -170,14 +200,14 @@ func initialScreen(formOnly bool, alreadyRegisteredAs string) screen {
 type model struct {
 	list   list.Model
 	form   formModel
+	theme  Theme
 	screen screen
 
 	formOnly            bool   // when true, esc on form cancels the whole TUI rather than going back to the list
 	hideNewProject      bool   // when true, the form/intent path is unreachable; selection-only mode
 	alreadyRegisteredAs string // shown on the AlreadyRegistered screen
 
-	selected  string
-	intent    *NewProjectIntent
+	intent    Intent // nil + cancelled=false should not happen; nil + cancelled=true means dismissed
 	cancelled bool
 
 	width, height int
@@ -220,7 +250,7 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				switch v := m.list.SelectedItem().(type) {
 				case Item:
-					m.selected = v.Key
+					m.intent = SwitchIntent{Name: v.Key}
 					return m, tea.Quit
 				case newProjectItem:
 					if m.hideNewProject {
@@ -248,7 +278,7 @@ func (m *model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if submitted {
-		m.intent = intent
+		m.intent = *intent
 		return m, tea.Quit
 	}
 	return m, cmd
@@ -258,7 +288,7 @@ func (m *model) updateAlreadyRegistered(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok {
 		switch km.String() {
 		case "s", "enter":
-			m.selected = m.alreadyRegisteredAs
+			m.intent = SwitchIntent{Name: m.alreadyRegisteredAs}
 			return m, tea.Quit
 		case "c":
 			m.screen = screenForm
@@ -283,34 +313,19 @@ func (m *model) View() string {
 }
 
 func (m *model) viewAlreadyRegistered() string {
-	out := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13")).Render(
+	out := m.theme.AlreadyRegisteredTitle.Render(
 		"This directory is already registered")
-	out += "\n\nProject: " + lipgloss.NewStyle().Bold(true).Render(m.alreadyRegisteredAs)
-	out += "\n\n" + lipgloss.NewStyle().Faint(true).Render(
+	out += "\n\nProject: " + m.theme.AlreadyRegisteredName.Render(m.alreadyRegisteredAs)
+	out += "\n\n" + m.theme.AlreadyRegisteredHelp.Render(
 		"[s/enter] switch to it   [c] continue creating new   [esc] cancel")
 	return out
 }
 
-// styles
-var (
-	titleStyle    = lipgloss.NewStyle().Bold(true)
-	descStyle     = lipgloss.NewStyle().Faint(true)
-	selectedTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-	selectedDesc  = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
+type itemDelegate struct {
+	theme Theme
+}
 
-	statusRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	statusStopped = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	statusBroken  = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-
-	trailingStyle    = lipgloss.NewStyle().Faint(true)
-	newProjectStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	newProjectFocus  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-	newProjectFooter = lipgloss.NewStyle().Faint(true)
-)
-
-type itemDelegate struct{}
-
-func newDelegate() itemDelegate { return itemDelegate{} }
+func newDelegate(t Theme) itemDelegate { return itemDelegate{theme: t} }
 
 func (itemDelegate) Height() int                             { return 2 }
 func (itemDelegate) Spacing() int                            { return 0 }
@@ -321,13 +336,13 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 
 	if _, ok := listItem.(newProjectItem); ok {
 		cursor := "  "
-		titleS := newProjectStyle
+		titleS := d.theme.NewProject
 		if selected {
 			cursor = "▌ "
-			titleS = newProjectFocus
+			titleS = d.theme.NewProjectFocus
 		}
 		_, _ = fmt.Fprintln(w, cursor+titleS.Render("+ New project"))
-		_, _ = fmt.Fprint(w, "    "+newProjectFooter.Render("press enter to register a project"))
+		_, _ = fmt.Fprint(w, "    "+d.theme.NewProjectFooter.Render("press enter to register a project"))
 		return
 	}
 
@@ -335,34 +350,34 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	if !ok {
 		return
 	}
-	titleS, descS := titleStyle, descStyle
+	titleS, descS := d.theme.Title, d.theme.Desc
 	if selected {
-		titleS, descS = selectedTitle, selectedDesc
+		titleS, descS = d.theme.SelectedTitle, d.theme.SelectedDesc
 	}
 	cursor := "  "
 	if selected {
 		cursor = "▌ "
 	}
 
-	first := fmt.Sprintf("%s%s   %s", cursor, titleS.Render(it.Title), renderStatus(it.Status))
+	first := fmt.Sprintf("%s%s   %s", cursor, titleS.Render(it.Title), d.renderStatus(it.Status))
 	if it.Trailing != "" {
-		first += "   " + trailingStyle.Render(it.Trailing)
+		first += "   " + d.theme.Trailing.Render(it.Trailing)
 	}
 	second := "    " + descS.Render(it.Description)
 	_, _ = fmt.Fprintln(w, first)
 	_, _ = fmt.Fprint(w, second)
 }
 
-func renderStatus(s string) string {
+func (d itemDelegate) renderStatus(s string) string {
 	switch s {
 	case "running":
-		return statusRunning.Render("● running")
+		return d.theme.StatusRunning.Render("● running")
 	case "dir-missing":
-		return statusBroken.Render("✖ dir missing")
+		return d.theme.StatusBroken.Render("✖ dir missing")
 	case "":
 		return ""
 	default:
-		return statusStopped.Render("○ " + s)
+		return d.theme.StatusStopped.Render("○ " + s)
 	}
 }
 

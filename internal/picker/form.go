@@ -6,23 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
-
-// NewProjectIntent is what the form returns when the user submits. The CLI
-// layer turns this into the actual registry/clone work.
-//
-// Exactly one of Dir or From is meaningful at submit time:
-//
-//   - If From is non-empty, the project will be created by cloning into Dir
-//     (Dir defaults to a sibling of cwd named after the repo).
-//   - Otherwise Dir is the existing directory to register.
-type NewProjectIntent struct {
-	Name     string
-	Dir      string
-	From     string
-	Template string
-}
 
 // FormDefaults is what the caller passes in to pre-populate the form.
 // All fields optional. AlreadyRegisteredAs, if non-empty, causes the model
@@ -84,6 +68,7 @@ type formModel struct {
 	gitRemote string
 	width     int
 	err       string
+	theme     Theme
 	// preview, if set, is called with the current value of the Layout
 	// template field; the returned string is shown below the form. See
 	// Options.PreviewTemplate for the rationale (kept as a callback so
@@ -120,7 +105,7 @@ func (d FormDefaults) effectiveDefault() string {
 	return hardcodedFallbackLayout
 }
 
-func newFormModel(d FormDefaults) formModel {
+func newFormModel(d FormDefaults, theme Theme) formModel {
 	mk := func(placeholder, value string) textinput.Model {
 		ti := textinput.New()
 		ti.Placeholder = placeholder
@@ -142,10 +127,11 @@ func newFormModel(d FormDefaults) formModel {
 
 	inputs[fieldName].Focus()
 	return formModel{
-		inputs:         inputs,
-		focus:          fieldName,
-		gitRemote:      d.GitRemote,
-		defaultLayout:  def,
+		inputs:        inputs,
+		focus:         fieldName,
+		gitRemote:     d.GitRemote,
+		theme:         theme,
+		defaultLayout: def,
 	}
 }
 
@@ -320,10 +306,10 @@ func (f *formModel) renderCycler() string {
 		name = f.layoutNames[f.layoutIdx]
 	}
 	left, right := "‹", "›"
-	leftStyle, rightStyle := formCyclerArrowStyle, formCyclerArrowStyle
+	leftStyle, rightStyle := f.theme.FormCyclerArrow, f.theme.FormCyclerArrow
 	if f.focus == fieldTemplate {
-		leftStyle = formCyclerArrowFocusStyle
-		rightStyle = formCyclerArrowFocusStyle
+		leftStyle = f.theme.FormCyclerArrowFocus
+		rightStyle = f.theme.FormCyclerArrowFocus
 	}
 	return "  " + leftStyle.Render(left) + "  " + name + "  " + rightStyle.Render(right)
 }
@@ -331,20 +317,20 @@ func (f *formModel) renderCycler() string {
 // view renders the form. Caller decides where to place it.
 func (f *formModel) view() string {
 	var b strings.Builder
-	b.WriteString(formTitleStyle.Render("Register a new project"))
+	b.WriteString(f.theme.FormTitle.Render("Register a new project"))
 	b.WriteString("\n\n")
 
 	if f.gitRemote != "" {
-		b.WriteString(formInfoStyle.Render("Detected git remote: " + f.gitRemote))
+		b.WriteString(f.theme.FormInfo.Render("Detected git remote: " + f.gitRemote))
 		b.WriteString("\n\n")
 	}
 
 	for i := range f.inputs {
 		label := formField(i).label()
 		if formField(i) == f.focus {
-			label = formLabelFocusStyle.Render("› " + label)
+			label = f.theme.FormLabelFocus.Render("› " + label)
 		} else {
-			label = formLabelStyle.Render("  " + label)
+			label = f.theme.FormLabel.Render("  " + label)
 		}
 		b.WriteString(label)
 		b.WriteString("\n")
@@ -360,7 +346,7 @@ func (f *formModel) view() string {
 	}
 
 	if f.err != "" {
-		b.WriteString(formErrStyle.Render("✖ " + f.err))
+		b.WriteString(f.theme.FormErr.Render("✖ " + f.err))
 		b.WriteString("\n\n")
 	}
 
@@ -368,7 +354,7 @@ func (f *formModel) view() string {
 	if f.cyclerActive() && f.focus == fieldTemplate {
 		help = "←/→ cycle layouts · " + help
 	}
-	b.WriteString(formHelpStyle.Render(help))
+	b.WriteString(f.theme.FormHelp.Render(help))
 
 	// Layout preview, if a renderer was wired in. We render below the
 	// form (option B from the design discussion) rather than side-by-side
@@ -385,7 +371,7 @@ func (f *formModel) view() string {
 		}
 		if rendered := f.preview(tpl); rendered != "" {
 			b.WriteString("\n\n")
-			b.WriteString(formLabelStyle.Render("  Preview of layout \"" + tpl + "\""))
+			b.WriteString(f.theme.FormLabel.Render("  Preview of layout \"" + tpl + "\""))
 			b.WriteString("\n")
 			// Indent each line to align with the form's input column.
 			for _, line := range strings.Split(rendered, "\n") {
@@ -397,14 +383,3 @@ func (f *formModel) view() string {
 	}
 	return b.String()
 }
-
-var (
-	formTitleStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-	formLabelStyle            = lipgloss.NewStyle().Faint(true)
-	formLabelFocusStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-	formInfoStyle             = lipgloss.NewStyle().Faint(true).Italic(true)
-	formErrStyle              = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	formHelpStyle             = lipgloss.NewStyle().Faint(true)
-	formCyclerArrowStyle      = lipgloss.NewStyle().Faint(true)
-	formCyclerArrowFocusStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-)

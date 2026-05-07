@@ -12,7 +12,7 @@ func newTestModel(items ...Item) *model {
 	for i, it := range items {
 		listItems[i] = it
 	}
-	l := list.New(listItems, newDelegate(), 80, 24)
+	l := list.New(listItems, newDelegate(defaultTheme()), 80, 24)
 	return &model{list: l}
 }
 
@@ -38,8 +38,8 @@ func TestModel_EnterSelectsCurrentItem(t *testing.T) {
 	// First item is selected by default.
 	updated, _ := m.Update(keyMsg("enter"))
 	mm := updated.(*model)
-	if mm.selected != "alpha" {
-		t.Fatalf("expected alpha, got %q", mm.selected)
+	if v, ok := mm.intent.(SwitchIntent); !ok || v.Name != "alpha" {
+		t.Fatalf("expected SwitchIntent{alpha}, got %#v", mm.intent)
 	}
 	if mm.cancelled {
 		t.Fatal("should not be cancelled on enter")
@@ -53,8 +53,8 @@ func TestModel_DownThenEnterSelectsSecond(t *testing.T) {
 	)
 	updated, _ := m.Update(keyMsg("down"))
 	updated, _ = updated.(*model).Update(keyMsg("enter"))
-	if got := updated.(*model).selected; got != "beta" {
-		t.Fatalf("expected beta, got %q", got)
+	if v, ok := updated.(*model).intent.(SwitchIntent); !ok || v.Name != "beta" {
+		t.Fatalf("expected SwitchIntent{beta}, got %#v", updated.(*model).intent)
 	}
 }
 
@@ -65,8 +65,8 @@ func TestModel_QCancels(t *testing.T) {
 	if !mm.cancelled {
 		t.Fatal("expected cancelled")
 	}
-	if mm.selected != "" {
-		t.Fatalf("expected no selection, got %q", mm.selected)
+	if mm.intent != nil {
+		t.Fatalf("expected nil intent, got %#v", mm.intent)
 	}
 }
 
@@ -82,8 +82,8 @@ func TestModel_EmptyList_EnterDoesNothing(t *testing.T) {
 	m := newTestModel()
 	updated, cmd := m.Update(keyMsg("enter"))
 	mm := updated.(*model)
-	if mm.selected != "" {
-		t.Fatalf("expected no selection, got %q", mm.selected)
+	if mm.intent != nil {
+		t.Fatalf("expected nil intent, got %#v", mm.intent)
 	}
 	if mm.cancelled {
 		t.Fatal("should not be cancelled")
@@ -94,12 +94,13 @@ func TestModel_EmptyList_EnterDoesNothing(t *testing.T) {
 
 func TestRenderStatus(t *testing.T) {
 	// Just smoke: doesn't crash and returns non-empty for known statuses.
+	d := newDelegate(defaultTheme())
 	for _, s := range []string{"running", "stopped", "dir-missing", "anything-else"} {
-		if got := renderStatus(s); got == "" {
+		if got := d.renderStatus(s); got == "" {
 			t.Errorf("renderStatus(%q) was empty", s)
 		}
 	}
-	if got := renderStatus(""); got != "" {
+	if got := d.renderStatus(""); got != "" {
 		t.Errorf("renderStatus(\"\") = %q, want empty", got)
 	}
 }

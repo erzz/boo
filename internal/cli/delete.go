@@ -123,6 +123,7 @@ func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 	res, err := picker.Run(items, picker.Options{
 		Title:          "boo — delete project",
 		HideNewProject: true,
+		Theme:          a.Config.ThemeOr("default"),
 	})
 	if err != nil {
 		return "", err
@@ -130,7 +131,13 @@ func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 	if res.Cancelled() {
 		return "", nil
 	}
-	return res.Selected, nil
+	si, ok := res.Intent.(picker.SwitchIntent)
+	if !ok {
+		// Should not happen — picker is in HideNewProject mode so only
+		// SwitchIntent and cancel are reachable.
+		return "", nil
+	}
+	return si.Name, nil
 }
 
 // confirmDelete asks the user to confirm a delete, spelling out exactly what
