@@ -38,6 +38,12 @@ var closeWindowScript string
 //go:embed jxa/open_layout.js
 var openLayoutScript string
 
+//go:embed jxa/describe_window.js
+var describeWindowScript string
+
+//go:embed jxa/front_window.js
+var frontWindowScript string
+
 // Client controls a running Ghostty instance.
 type Client struct {
 	runner booexec.Runner
@@ -133,6 +139,30 @@ func (c *Client) ProbeAutomation(ctx context.Context) error {
 		return fmt.Errorf("ghostty probe: unexpected response %q", stdout)
 	}
 	return nil
+}
+
+// FrontWindowID returns the ID of Ghostty's currently-front window, or ""
+// if Ghostty isn't running or has no windows. Used by `boo save` (no args)
+// to identify "the project the user is currently in".
+//
+// This deliberately does NOT error when Ghostty is not running — the caller
+// (`boo save`) treats "no front window" as a plain miss, not a fault.
+func (c *Client) FrontWindowID(ctx context.Context) (string, error) {
+	stdout, stderr, err := c.run(ctx, frontWindowScript, nil)
+	if err != nil {
+		return "", fmt.Errorf("ghostty front window: %w (stderr: %s)", err, stderr)
+	}
+	var out struct {
+		WindowID string `json:"windowId"`
+		Error    string `json:"error,omitempty"`
+	}
+	if jerr := json.Unmarshal(stdout, &out); jerr != nil {
+		return "", fmt.Errorf("ghostty front window: parse %q: %w", stdout, jerr)
+	}
+	if out.Error != "" {
+		return "", errors.New(out.Error)
+	}
+	return out.WindowID, nil
 }
 
 // WindowExists reports whether the given (process-lifetime) window ID is
@@ -244,6 +274,56 @@ func (c *Client) OpenLayout(ctx context.Context, p OpenLayoutParams) (*OpenWindo
 		return nil, fmt.Errorf("ghostty open layout: empty windowId in response %q", stdout)
 	}
 	return &OpenWindowResult{WindowID: out.WindowID}, nil
+}
+
+// DescribedTerminal is one terminal surface inside a captured tab.
+//
+// Ghostty's AppleScript dictionary exposes only id, title, and working
+// directory per terminal — split direction, the launching command, and
+// environment are NOT recoverable. Callers (notably `boo save`) must surface
+// that limitation to users.
+type DescribedTerminal struct {
+	ID               string `json:"id"`
+	WorkingDirectory string `json:"workingDirectory"`
+	Title            string `json:"title,omitempty"`
+}
+
+// DescribedTab is one tab in a captured window.
+type DescribedTab struct {
+	Name      string              `json:"name,omitempty"`
+	Terminals []DescribedTerminal `json:"terminals"`
+}
+
+// DescribedWindow is the structure of a live Ghostty window as seen via the
+// AppleScript dictionary. Direction/command/env are not present — see
+// DescribedTerminal.
+type DescribedWindow struct {
+	Tabs []DescribedTab `json:"tabs"`
+}
+
+// DescribeWindow inspects a live Ghostty window and returns its tab/terminal
+// structure for layout capture. Returns an error if the window no longer
+// exists.
+func (c *Client) DescribeWindow(ctx context.Context, windowID string) (*DescribedWindow, error) {
+	if windowID == "" {
+		return nil, errors.New("ghostty describe window: empty windowId")
+	}
+	stdin, _ := json.Marshal(map[string]string{"windowId": windowID})
+	stdout, stderr, err := c.run(ctx, describeWindowScript, stdin)
+	if err != nil {
+		return nil, fmt.Errorf("ghostty describe window: %w (stderr: %s)", err, stderr)
+	}
+	var out struct {
+		Tabs  []DescribedTab `json:"tabs"`
+		Error string         `json:"error,omitempty"`
+	}
+	if jerr := json.Unmarshal(stdout, &out); jerr != nil {
+		return nil, fmt.Errorf("ghostty describe window: parse %q: %w", stdout, jerr)
+	}
+	if out.Error != "" {
+		return nil, errors.New(out.Error)
+	}
+	return &DescribedWindow{Tabs: out.Tabs}, nil
 }
 
 // CloseWindow closes the window with the given ID. A window that no longer

@@ -16,7 +16,7 @@ func newTestModel(items ...Item) *model {
 	return &model{list: l}
 }
 
-func key(s string) tea.KeyMsg {
+func keyMsg(s string) tea.KeyMsg {
 	switch s {
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
@@ -36,7 +36,7 @@ func TestModel_EnterSelectsCurrentItem(t *testing.T) {
 		Item{Key: "beta", Title: "beta"},
 	)
 	// First item is selected by default.
-	updated, _ := m.Update(key("enter"))
+	updated, _ := m.Update(keyMsg("enter"))
 	mm := updated.(*model)
 	if mm.selected != "alpha" {
 		t.Fatalf("expected alpha, got %q", mm.selected)
@@ -51,8 +51,8 @@ func TestModel_DownThenEnterSelectsSecond(t *testing.T) {
 		Item{Key: "alpha", Title: "alpha"},
 		Item{Key: "beta", Title: "beta"},
 	)
-	updated, _ := m.Update(key("down"))
-	updated, _ = updated.(*model).Update(key("enter"))
+	updated, _ := m.Update(keyMsg("down"))
+	updated, _ = updated.(*model).Update(keyMsg("enter"))
 	if got := updated.(*model).selected; got != "beta" {
 		t.Fatalf("expected beta, got %q", got)
 	}
@@ -60,7 +60,7 @@ func TestModel_DownThenEnterSelectsSecond(t *testing.T) {
 
 func TestModel_QCancels(t *testing.T) {
 	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
-	updated, _ := m.Update(key("q"))
+	updated, _ := m.Update(keyMsg("q"))
 	mm := updated.(*model)
 	if !mm.cancelled {
 		t.Fatal("expected cancelled")
@@ -72,7 +72,7 @@ func TestModel_QCancels(t *testing.T) {
 
 func TestModel_EscCancels(t *testing.T) {
 	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
-	updated, _ := m.Update(key("esc"))
+	updated, _ := m.Update(keyMsg("esc"))
 	if !updated.(*model).cancelled {
 		t.Fatal("expected cancelled")
 	}
@@ -80,7 +80,7 @@ func TestModel_EscCancels(t *testing.T) {
 
 func TestModel_EmptyList_EnterDoesNothing(t *testing.T) {
 	m := newTestModel()
-	updated, cmd := m.Update(key("enter"))
+	updated, cmd := m.Update(keyMsg("enter"))
 	mm := updated.(*model)
 	if mm.selected != "" {
 		t.Fatalf("expected no selection, got %q", mm.selected)

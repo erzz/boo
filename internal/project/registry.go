@@ -46,7 +46,8 @@ var nameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 // reservedNames are CLI verbs / flags that would shadow boo subcommands.
 // Refusing them keeps `boo <name>` unambiguous.
 var reservedNames = map[string]bool{
-	"doctor": true, "new": true, "list": true, "pick": true, "rm": true,
+	"doctor": true, "new": true, "list": true, "delete": true,
+	"save": true, "fzf": true,
 	"help": true, "completion": true,
 }
 

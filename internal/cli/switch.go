@@ -17,44 +17,37 @@ import (
 // runRoot dispatches the bare 'boo' / 'boo <name>' invocation.
 //
 //   - 'boo <name>' switches to that project (focus existing window or open new).
-//   - 'boo' (no args) detects the current cwd and switches to the project
-//     registered at that exact path, if any.
+//   - 'boo' (no args) always opens the built-in TUI picker. We deliberately
+//     do NOT cwd-detect-and-switch: if the user is already sitting inside a
+//     project's Ghostty window, that path would just reopen the window they
+//     are typing into. The picker is the one obvious behaviour for "no args".
 func runRoot(cmd *cobra.Command, args []string) error {
 	a, err := newApp()
 	if err != nil {
 		return err
 	}
-	reg, err := project.Load(a.Paths)
-	if err != nil {
-		return err
-	}
 
-	var name string
 	if len(args) == 1 {
-		name = args[0]
+		reg, err := project.Load(a.Paths)
+		if err != nil {
+			return err
+		}
+		name := args[0]
 		if err := project.ValidateName(name); err != nil {
 			return err
 		}
-	} else {
-		dir, err := resolveDir("")
+		p, err := reg.Get(name)
 		if err != nil {
+			if errors.Is(err, project.ErrNotFound) {
+				return fmt.Errorf("project %q not found. Create it with: boo new %s --dir <path>", name, name)
+			}
 			return err
 		}
-		p, err := reg.FindByDir(dir)
-		if err != nil {
-			return fmt.Errorf("not inside a registered project (%s).\nUse 'boo new <name> --dir .' to register, or 'boo list' to see known projects", dir)
-		}
-		name = p.Name
+		return switchToProject(cmd.Context(), a, p)
 	}
 
-	p, err := reg.Get(name)
-	if err != nil {
-		if errors.Is(err, project.ErrNotFound) {
-			return fmt.Errorf("project %q not found. Create it with: boo new %s --dir <path>", name, name)
-		}
-		return err
-	}
-	return switchToProject(cmd.Context(), a, p)
+	// No args: always open the picker.
+	return runPicker(cmd.Context(), a, pickerTUI, cmd.OutOrStdout())
 }
 
 // switchToProject focuses the project's existing window if alive, otherwise

@@ -18,16 +18,19 @@
     const app = Application("Ghostty");
     app.includeStandardAdditions = true;
 
-    const cfgFields = {};
-    if (params.workingDirectory) cfgFields.initialWorkingDirectory = params.workingDirectory;
-    if (params.command)          cfgFields.command = params.command;
+    // IMPORTANT: see open_layout.js — Ghostty silently ignores fields passed
+    // via the constructor's object argument. Properties must be assigned to
+    // the returned record after creation.
+    const cfg = app.newSurfaceConfiguration();
+    if (params.workingDirectory) cfg.initialWorkingDirectory = params.workingDirectory;
+    if (params.command)          cfg.command = params.command;
+    if (params.initialInput)     cfg.initialInput = params.initialInput;
     if (params.env) {
       const envList = [];
       for (const k of Object.keys(params.env)) envList.push(`${k}=${params.env[k]}`);
-      if (envList.length) cfgFields.environmentVariables = envList;
+      if (envList.length) cfg.environmentVariables = envList;
     }
 
-    const cfg = app.newSurfaceConfiguration(cfgFields);
     const win = app.newWindow({ withConfiguration: cfg });
 
     return JSON.stringify({ windowId: String(win.id()) });

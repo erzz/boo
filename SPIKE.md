@@ -49,6 +49,12 @@ $ osascript -l JavaScript -e 'Application("Ghostty").version()'
 ### Real-world quirks discovered during scaffold
 
 - The `.sdef` declares `new surface configuration` as a **command**, not a class. In JXA you call it as `app.newSurfaceConfiguration({...})` (lowercase, command-style), not `app.NewSurfaceConfiguration(...)`. Calling the latter yields `"NewSurfaceConfiguration is not a valid class for application Ghostty"`.
+- **Surface configuration properties are silently dropped if passed to the constructor.** Verified on Ghostty 1.3.x: `app.newSurfaceConfiguration({initialWorkingDirectory: "/tmp"})` returns a config object, but the field is ignored — windows open in the cwd of the `osascript` process. The properties **must** be assigned to the returned record after construction:
+  ```js
+  const cfg = app.newSurfaceConfiguration();
+  cfg.initialWorkingDirectory = "/tmp";  // this works
+  ```
+  Re-test if Ghostty's AppleScript dictionary changes.
 - Window IDs returned look like `"tab-group-9a98cc000"` — opaque strings, fine for our purposes.
 - No Automation permission prompt was triggered for either read-only (`version`) or write (`new window`) operations from the OpenCode-spawned shell. May differ from a fresh user's first run; `boo doctor` should still surface the possibility.
 

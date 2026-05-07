@@ -1,132 +1,278 @@
-// Package picker is the Bubble Tea TUI used by `boo pick`.
+// Package picker is the Bubble Tea TUI used by `boo`.
 //
 // It owns nothing project-specific: callers pass in a slice of items and
-// receive back the chosen one (or nothing, if the user cancelled). The CLI
-// layer does the switch; this keeps the picker free of Ghostty/process
-// dependencies and trivially testable.
+// receive back a Result describing what the user wants to do next (switch
+// to an existing project, create a new one, or cancel). The CLI layer
+// performs the actual side effects. This keeps the picker free of
+// Ghostty/registry/process dependencies and trivially testable.
 package picker
 
 import (
 	"fmt"
 	"io"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Item is one row in the picker. Title is shown in bold; Description appears
-// dimmed underneath. Status is a short word ("running", "stopped",
-// "dir-missing") rendered as a badge.
+// Item is one row in the picker.
 type Item struct {
-	Key         string // unique identifier returned to the caller (typically the project name)
+	Key         string
 	Title       string
 	Description string
-	Status      string
-	Trailing    string // small right-aligned hint, e.g. "2h ago"
+	Status      string // "running" | "stopped" | "dir-missing" | ""
+	Trailing    string
 }
 
-// satisfy bubbles/list.Item
+// FilterValue satisfies bubbles/list.Item.
 func (i Item) FilterValue() string { return i.Title + " " + i.Description }
 
-// Result is what Run returns. Selected is empty when the user cancelled.
+// newProjectItem is the synthetic "+ New project" row injected at the bottom.
+type newProjectItem struct{}
+
+func (newProjectItem) FilterValue() string { return "+ New project" }
+
+// Result describes what the user did. At most one of Selected and NewProject
+// is populated; if neither is set the user cancelled.
 type Result struct {
-	Selected string // matches Item.Key
+	Selected   string
+	NewProject *NewProjectIntent
 }
 
-// Run shows the picker and blocks until the user selects an item or cancels.
+// Cancelled reports whether the user dismissed the UI without choosing.
+func (r Result) Cancelled() bool { return r.Selected == "" && r.NewProject == nil }
+
+// Options configures Run.
+type Options struct {
+	Title    string
+	Defaults FormDefaults
+	// SkipListGoStraightToForm opens the form immediately, skipping the
+	// project list. Used by `boo new` (no positional args).
+	SkipListGoStraightToForm bool
+	// HideNewProject suppresses the synthetic "+ New project" row and the
+	// 'n'/'+' keybind that opens the form. Used by selection-only callers
+	// like `boo delete` where creating a new project from the picker would
+	// make no sense.
+	HideNewProject bool
+}
+
+// Run shows the TUI and blocks until the user makes a decision.
 //
-// Renders to stderr so command output redirected via stdout (`boo pick > x`)
-// doesn't get mangled, and so the alt-screen restore at exit is clean even if
-// stdout is a pipe.
-func Run(title string, items []Item) (Result, error) {
-	listItems := make([]list.Item, len(items))
-	for i, it := range items {
-		listItems[i] = it
+// Renders to stderr so command output redirected via stdout doesn't get
+// mangled and the alt-screen restore at exit is clean.
+func Run(items []Item, opts Options) (Result, error) {
+	listItems := make([]list.Item, 0, len(items)+1)
+	for _, it := range items {
+		listItems = append(listItems, it)
 	}
+	if !opts.HideNewProject {
+		listItems = append(listItems, newProjectItem{})
+	}
+
 	l := list.New(listItems, newDelegate(), 0, 0)
+	title := opts.Title
+	if title == "" {
+		title = "boo — projects"
+	}
 	l.Title = title
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(true)
 	l.SetFilteringEnabled(true)
 	l.Styles.Title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
+	if !opts.HideNewProject {
+		l.AdditionalShortHelpKeys = shortKeys
+		l.AdditionalFullHelpKeys = shortKeys
+	}
 
-	m := model{list: l}
-	prog := tea.NewProgram(&m, tea.WithAltScreen(), tea.WithOutput(stderr()))
+	form := newFormModel(opts.Defaults)
+
+	scr := screenList
+	formOnly := opts.SkipListGoStraightToForm
+	// AlreadyRegistered takes precedence over formOnly: if the caller already
+	// knows the dir is registered, the user needs to see the switch/continue
+	// prompt, not blunder into a form that will fail on submit.
+	switch {
+	case opts.Defaults.AlreadyRegisteredAs != "":
+		scr = screenAlreadyRegistered
+	case formOnly:
+		scr = screenForm
+	}
+
+	m := &model{
+		list:                l,
+		form:                form,
+		screen:              scr,
+		formOnly:            formOnly,
+		hideNewProject:      opts.HideNewProject,
+		alreadyRegisteredAs: opts.Defaults.AlreadyRegisteredAs,
+	}
+	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(stderr()))
 	final, err := prog.Run()
 	if err != nil {
 		return Result{}, fmt.Errorf("picker: %w", err)
 	}
 	mm := final.(*model)
-	if mm.cancelled || mm.selected == "" {
+	if mm.cancelled {
 		return Result{}, nil
+	}
+	if mm.intent != nil {
+		return Result{NewProject: mm.intent}, nil
 	}
 	return Result{Selected: mm.selected}, nil
 }
 
-// model is the Bubble Tea model. Held as a pointer because the program needs
-// to read the final state (selection) after Run returns.
+// screen identifies the active sub-view.
+type screen int
+
+const (
+	screenList screen = iota
+	screenForm
+	screenAlreadyRegistered
+)
+
 type model struct {
-	list      list.Model
+	list   list.Model
+	form   formModel
+	screen screen
+
+	formOnly            bool   // when true, esc on form cancels the whole TUI rather than going back to the list
+	hideNewProject      bool   // when true, the form/intent path is unreachable; selection-only mode
+	alreadyRegisteredAs string // shown on the AlreadyRegistered screen
+
 	selected  string
+	intent    *NewProjectIntent
 	cancelled bool
-	width     int
-	height    int
+
+	width, height int
 }
 
 func (m *model) Init() tea.Cmd { return nil }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		// Leave a couple of lines for title + help.
-		m.list.SetSize(msg.Width, msg.Height)
+	if sz, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width, m.height = sz.Width, sz.Height
+		m.list.SetSize(sz.Width, sz.Height)
+		m.form.setSize(sz.Width)
 		return m, nil
+	}
 
-	case tea.KeyMsg:
-		// While the filter input is focused, only Esc/Enter should escape it;
-		// everything else (including q) is text input. The list model handles
-		// this internally — we only intercept when the filter is *not* active.
-		if m.list.FilterState() == list.Filtering {
-			break
-		}
-		switch msg.String() {
-		case "q", "esc", "ctrl+c":
-			m.cancelled = true
-			return m, tea.Quit
-		case "enter":
-			if it, ok := m.list.SelectedItem().(Item); ok {
-				m.selected = it.Key
+	switch m.screen {
+	case screenAlreadyRegistered:
+		return m.updateAlreadyRegistered(msg)
+	case screenForm:
+		return m.updateForm(msg)
+	default:
+		return m.updateList(msg)
+	}
+}
+
+func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyMsg); ok {
+		// While the filter input is focused, pass everything through.
+		if m.list.FilterState() != list.Filtering {
+			switch km.String() {
+			case "q", "ctrl+c", "esc":
+				m.cancelled = true
 				return m, tea.Quit
+			case "n", "+":
+				if m.hideNewProject {
+					break
+				}
+				m.screen = screenForm
+				return m, nil
+			case "enter":
+				switch v := m.list.SelectedItem().(type) {
+				case Item:
+					m.selected = v.Key
+					return m, tea.Quit
+				case newProjectItem:
+					if m.hideNewProject {
+						break
+					}
+					m.screen = screenForm
+					return m, nil
+				}
 			}
 		}
 	}
-
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
 }
 
-func (m *model) View() string { return m.list.View() }
+func (m *model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmd, submitted, intent, cancelled := m.form.update(msg)
+	if cancelled {
+		if m.formOnly {
+			m.cancelled = true
+			return m, tea.Quit
+		}
+		m.screen = screenList
+		return m, nil
+	}
+	if submitted {
+		m.intent = intent
+		return m, tea.Quit
+	}
+	return m, cmd
+}
 
-// styles —— intentionally restrained. boo's TUI is a launcher, not a dashboard.
+func (m *model) updateAlreadyRegistered(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.String() {
+		case "s", "enter":
+			m.selected = m.alreadyRegisteredAs
+			return m, tea.Quit
+		case "c":
+			m.screen = screenForm
+			return m, nil
+		case "esc", "q", "ctrl+c":
+			m.cancelled = true
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m *model) View() string {
+	switch m.screen {
+	case screenAlreadyRegistered:
+		return m.viewAlreadyRegistered()
+	case screenForm:
+		return m.form.view()
+	default:
+		return m.list.View()
+	}
+}
+
+func (m *model) viewAlreadyRegistered() string {
+	out := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13")).Render(
+		"This directory is already registered")
+	out += "\n\nProject: " + lipgloss.NewStyle().Bold(true).Render(m.alreadyRegisteredAs)
+	out += "\n\n" + lipgloss.NewStyle().Faint(true).Render(
+		"[s/enter] switch to it   [c] continue creating new   [esc] cancel")
+	return out
+}
+
+// styles
 var (
 	titleStyle    = lipgloss.NewStyle().Bold(true)
 	descStyle     = lipgloss.NewStyle().Faint(true)
 	selectedTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
 	selectedDesc  = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
 
-	statusRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true) // green
-	statusStopped = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))             // grey
-	statusBroken  = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)  // red
+	statusRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	statusStopped = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	statusBroken  = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 
-	trailingStyle = lipgloss.NewStyle().Faint(true)
+	trailingStyle    = lipgloss.NewStyle().Faint(true)
+	newProjectStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	newProjectFocus  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
+	newProjectFooter = lipgloss.NewStyle().Faint(true)
 )
 
-// itemDelegate renders each row. We roll our own (instead of the bubbles
-// default) so we get a single-line presentation with status badge + trailing
-// timestamp.
 type itemDelegate struct{}
 
 func newDelegate() itemDelegate { return itemDelegate{} }
@@ -136,23 +282,34 @@ func (itemDelegate) Spacing() int                            { return 0 }
 func (itemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	selected := index == m.Index()
+
+	if _, ok := listItem.(newProjectItem); ok {
+		cursor := "  "
+		titleS := newProjectStyle
+		if selected {
+			cursor = "▌ "
+			titleS = newProjectFocus
+		}
+		fmt.Fprintln(w, cursor+titleS.Render("+ New project"))
+		fmt.Fprint(w, "    "+newProjectFooter.Render("press enter to register a project"))
+		return
+	}
+
 	it, ok := listItem.(Item)
 	if !ok {
 		return
 	}
-	selected := index == m.Index()
 	titleS, descS := titleStyle, descStyle
 	if selected {
 		titleS, descS = selectedTitle, selectedDesc
 	}
-	status := renderStatus(it.Status)
-
 	cursor := "  "
 	if selected {
 		cursor = "▌ "
 	}
 
-	first := fmt.Sprintf("%s%s   %s", cursor, titleS.Render(it.Title), status)
+	first := fmt.Sprintf("%s%s   %s", cursor, titleS.Render(it.Title), renderStatus(it.Status))
 	if it.Trailing != "" {
 		first += "   " + trailingStyle.Render(it.Trailing)
 	}
@@ -171,5 +328,14 @@ func renderStatus(s string) string {
 		return ""
 	default:
 		return statusStopped.Render("○ " + s)
+	}
+}
+
+func shortKeys() []key.Binding {
+	return []key.Binding{
+		key.NewBinding(
+			key.WithKeys("n", "+"),
+			key.WithHelp("n", "new project"),
+		),
 	}
 }

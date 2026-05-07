@@ -20,6 +20,9 @@ func NewRoot() *cobra.Command {
 Switch between project-scoped Ghostty windows by name. Each project remembers
 its layout (windows, tabs, splits, working directories, startup commands).
 
+Run 'boo' with no arguments to open the interactive picker. Use
+'boo <name>' to switch directly to a known project.
+
 Run 'boo doctor' to verify your environment.`,
 		SilenceUsage: true,
 		PersistentPreRun: func(_ *cobra.Command, _ []string) {
@@ -40,8 +43,9 @@ Run 'boo doctor' to verify your environment.`,
 		newDoctorCmd(),
 		newNewCmd(),
 		newListCmd(),
-		newPickCmd(),
-		newRmCmd(),
+		newFzfCmd(),
+		newDeleteCmd(),
+		newSaveCmd(),
 	)
 
 	return root

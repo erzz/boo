@@ -100,7 +100,7 @@ boo/
 2. **`boo projA` (window gone):** load layout snapshot → generate JXA from layout → execute → store new `WindowID`.
 3. **`boo projA` (Ghostty not running):** `open -na Ghostty.app` → wait for app to be up (poll AppleScript) → same as above.
 4. **`boo projA` (unknown):** print hint `project "projA" not found. create it with: boo new projA`. Exit non-zero.
-5. **`boo` (no args):** detect cwd → if inside a registered project's dir, treat as `boo <that-name>`. Else show short help.
+5. **`boo` (no args):** open the built-in TUI picker. Deliberately does *not* cwd-detect-and-switch — running `boo` from inside a project's already-open Ghostty window would otherwise just reopen the window the user is typing into. The picker is the one obvious behaviour for no-args.
 6. **`boo new projA`:** prompt or accept flags for source (`--from <git-url>` to clone, `--into <dir>`, or `--dir <existing>`) and layout (`--layout <name>`, default = `default`). Clone if needed. Resolve layout template → write snapshot to `projects/projA/layout.toml`. Add to registry.
 7. **`boo pick`:** Bubble Tea list of projects (name, dir, last-launched, status: window-open / window-closed / dir-missing) → enter dispatches to flow 1/2/3.
 

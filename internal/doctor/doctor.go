@@ -66,6 +66,7 @@ func AllChecks(client *ghostty.Client) []CheckFunc {
 		ghosttyRunningCheck(client),
 		ghosttyVersionRangeCheck(),
 		ghosttyAutomationCheck(client),
+		checkFzfOptional,
 	}
 }
 
@@ -231,6 +232,20 @@ func isGhosttyNotRunning(msg string) bool {
 	// AppleScript can't even resolve the bundle. Other shapes: "isn't running".
 	return strings.Contains(msg, "isn't running") ||
 		strings.Contains(msg, "Application can't be found")
+}
+
+// checkFzfOptional reports whether fzf is available. fzf is optional —
+// `boo pick` works fine without it — so a missing fzf is Skip, not Warn.
+func checkFzfOptional(_ context.Context, _ []Result) Result {
+	if path, err := exec.LookPath("fzf"); err == nil {
+		return Result{Name: "fzf (optional)", Status: OK, Detail: path}
+	}
+	return Result{
+		Name:   "fzf (optional)",
+		Status: Skip,
+		Detail: "fzf not found on PATH",
+		Hint:   "Install fzf to use 'boo pick --fzf'. The built-in picker works without it.",
+	}
 }
 
 func isAutomationDenied(msg string) bool {

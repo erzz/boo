@@ -38,16 +38,22 @@
     app.includeStandardAdditions = true;
 
     function buildCfg(s) {
-      const fields = {};
-      if (s.workingDirectory) fields.initialWorkingDirectory = s.workingDirectory;
-      if (s.command)          fields.command = s.command;
-      if (s.initialInput)     fields.initialInput = s.initialInput;
+      // IMPORTANT: Ghostty's `new surface configuration` command silently
+      // discards properties passed via the constructor's object argument
+      // (e.g. `app.newSurfaceConfiguration({initialWorkingDirectory: ...})`).
+      // The properties must be assigned to the returned record after creation.
+      // This is true as of Ghostty 1.3.x. Re-test if Ghostty's AppleScript
+      // dictionary changes.
+      const cfg = app.newSurfaceConfiguration();
+      if (s.workingDirectory) cfg.initialWorkingDirectory = s.workingDirectory;
+      if (s.command)          cfg.command = s.command;
+      if (s.initialInput)     cfg.initialInput = s.initialInput;
       if (s.env) {
         const envList = [];
         for (const k of Object.keys(s.env)) envList.push(`${k}=${s.env[k]}`);
-        if (envList.length) fields.environmentVariables = envList;
+        if (envList.length) cfg.environmentVariables = envList;
       }
-      return app.newSurfaceConfiguration(fields);
+      return cfg;
     }
 
     let win;
