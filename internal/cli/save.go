@@ -17,7 +17,7 @@ import (
 	"github.com/erzz/boo/internal/project"
 )
 
-// isLayoutParseError reports whether err came from layout decoding (TOML
+// isLayoutParseError reports whether err came from layout decoding (YAML
 // parse / validate) rather than the underlying filesystem. The layout
 // package wraps both with the prefix "layout:", so a substring check is
 // sufficient and keeps us from leaking knowledge of the parser internals.
@@ -111,6 +111,8 @@ still printed to stderr under --force so audit logs show what was lost.`,
 						Defaults:                 defs,
 						SkipListGoStraightToForm: true,
 						HideNewProject:           true,
+						PreviewTemplate:          templatePreviewer(a),
+						LayoutNames:              templateNames(a),
 					})
 					if err != nil {
 						return err
@@ -147,11 +149,11 @@ still printed to stderr under --force so audit logs show what was lost.`,
 			}
 
 			tabs := len(newLayout.Tabs)
-			splits := 0
+			leaves := 0
 			for _, t := range newLayout.Tabs {
-				splits += len(t.Splits)
+				leaves += len(collectLeaves(t.Root))
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Captured %d tab(s), %d split(s) from window %s\n", tabs, splits, rt.WindowID)
+			fmt.Fprintf(c.OutOrStdout(), "Captured %d tab(s), %d pane(s) from window %s\n", tabs, leaves, rt.WindowID)
 			for _, w := range warnings {
 				fmt.Fprintf(c.ErrOrStderr(), "warning: %s\n", w)
 			}
@@ -353,53 +355,58 @@ func firstTerminalCwd(d *ghostty.DescribedWindow) string {
 }
 
 // capturedToLayout projects a Ghostty DescribedWindow into boo's layout
-// vocabulary.
+// vocabulary as a flat tree.
+//
+// Why flat
+// --------
+// Ghostty's AppleScript dictionary returns a per-tab list of terminals
+// with no information about how they're nested or split. We have no
+// way to recover the tree shape from a live capture, so capture always
+// emits the canonical flat representation:
+//
+//   - 1 terminal in a tab → a single leaf as the tab's root.
+//   - N terminals       → a right-leaning chain of `row` splits
+//     (built by save_merge's buildFlatRoot).
+//
+// mergeForSave is then responsible for either preserving the previous
+// tab's tree shape (when leaf counts match) or accepting this flat
+// shape (when they don't, surfacing the loss in the diff).
 //
 // The conversion rules:
-//
 //   - Each captured tab becomes one layout.Tab.
-//   - Each terminal in a tab becomes one layout.Split. Terminals are emitted
-//     in the order Ghostty returns them; the first is the primary surface
-//     (no direction), the rest are saved as direction = "right" because
-//     Ghostty's API doesn't expose the actual direction.
-//   - Each split's cwd is the terminal's working directory, made relative to
-//     the project root if it lives under it. Absolute paths are kept as-is.
+//   - Each terminal becomes one leaf (cwd from terminal.WorkingDirectory,
+//     made relative to the project root if it lives under it).
 //   - Tab names are preserved when non-empty.
-//
-// The caller is responsible for surfacing what was lost vs the previously
-// saved layout via diffForSave / renderDiff. This function only returns
-// warnings about defensive cases (e.g. a tab Ghostty reported with zero
-// terminals); structural / lossy comparisons are not its job.
 //
 // What is NOT captured (use the diff to surface contextually):
 //   - command (Ghostty doesn't expose the original launch command)
 //   - env    (likewise)
-//   - direction beyond "this is a non-primary split"
+//   - tree shape (Ghostty's API gives a flat list)
 //   - initial_input
 func capturedToLayout(p project.Project, desc *ghostty.DescribedWindow) (layout.Layout, []string) {
 	out := layout.Layout{Name: p.Layout}
 	if out.Name == "" {
-		out.Name = "default"
+		out.Name = "triple"
 	}
 
 	var warnings []string
 	for _, dt := range desc.Tabs {
-		tab := layout.Tab{Name: dt.Name}
-		for i, term := range dt.Terminals {
-			split := layout.Split{Cwd: relativiseCwd(p.Dir, term.WorkingDirectory)}
-			if i > 0 {
-				split.Direction = layout.DirRight
-			}
-			tab.Splits = append(tab.Splits, split)
-		}
-		// A tab must have at least one split for the layout to validate. If
-		// Ghostty returns a tab with no terminals (shouldn't happen, but be
-		// defensive), drop the tab and warn.
-		if len(tab.Splits) == 0 {
+		// A tab must have at least one terminal for the layout to
+		// validate. Defensive: Ghostty shouldn't return a tab with no
+		// terminals, but if it does we drop the tab and warn rather
+		// than producing an invalid layout.
+		if len(dt.Terminals) == 0 {
 			warnings = append(warnings, fmt.Sprintf("tab %q had no terminals; dropped", dt.Name))
 			continue
 		}
-		out.Tabs = append(out.Tabs, tab)
+		leaves := make([]layout.Split, len(dt.Terminals))
+		for i, term := range dt.Terminals {
+			leaves[i] = layout.Split{Cwd: relativiseCwd(p.Dir, term.WorkingDirectory)}
+		}
+		out.Tabs = append(out.Tabs, layout.Tab{
+			Name: dt.Name,
+			Root: buildFlatRoot(leaves),
+		})
 	}
 	return out, warnings
 }

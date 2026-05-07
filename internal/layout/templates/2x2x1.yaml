@@ -1,0 +1,18 @@
+# Two tabs, each split into two columns side by side. Doubles the
+# 1x2x1 "edit / run" layout, giving you two independent two-pane
+# contexts in one window.
+
+name: 2x2x1
+tabs:
+  - name: main
+    split:
+      direction: row
+      children:
+        - cwd: .
+        - cwd: .
+  - name: secondary
+    split:
+      direction: row
+      children:
+        - cwd: .
+        - cwd: .

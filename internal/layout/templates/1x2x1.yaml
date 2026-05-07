@@ -1,0 +1,13 @@
+# One tab, two columns side by side. Classic edit-here / run-there
+# layout: left pane for your editor, right pane for tests, logs,
+# REPL, whatever. No commands pre-set so this works on any machine
+# regardless of which tools you have installed.
+
+name: 1x2x1
+tabs:
+  - name: main
+    split:
+      direction: row
+      children:
+        - cwd: .
+        - cwd: .

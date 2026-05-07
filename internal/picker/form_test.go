@@ -1,6 +1,9 @@
 package picker
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestForm_Collect_RequiresName(t *testing.T) {
 	f := newFormModel(FormDefaults{Dir: "/x"})
@@ -26,8 +29,8 @@ func TestForm_Collect_DefaultsTemplateToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if got.Template != "default" {
-		t.Errorf("template = %q, want 'default'", got.Template)
+	if got.Template != "triple" {
+		t.Errorf("template = %q, want 'triple'", got.Template)
 	}
 }
 
@@ -65,4 +68,84 @@ func TestForm_FocusPrevWraps(t *testing.T) {
 	if f.focus != numFormFields-1 {
 		t.Errorf("focus after prev from 0 = %d, want %d", f.focus, numFormFields-1)
 	}
+}
+
+// `boo new` and bare `boo` show the new-project form. When a preview
+// callback is wired in, the form should:
+//   - render the preview output below the inputs
+//   - default to "triple" when the template field is blank (mirrors
+//     collect()'s behaviour, so what the user sees matches what they
+//     get on submit)
+//   - show NO preview block when the callback returns "" (template
+//     unknown / mid-typing) — surfacing errors inside a TUI form is
+//     hostile, silence is the right default here
+
+func TestForm_View_RendersPreviewWhenCallbackReturnsContent(t *testing.T) {
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "dev"})
+	f.preview = func(name string) string {
+		if name != "dev" {
+			t.Errorf("preview called with %q, want %q", name, "dev")
+		}
+		return "+---+\n| . |\n+---+"
+	}
+	out := f.view()
+	if !strings.Contains(out, "Preview of layout \"dev\"") {
+		t.Errorf("view missing preview header:\n%s", out)
+	}
+	if !strings.Contains(out, "+---+") {
+		t.Errorf("view missing preview body:\n%s", out)
+	}
+}
+
+func TestForm_View_HidesPreviewWhenCallbackReturnsEmpty(t *testing.T) {
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "nope"})
+	called := false
+	f.preview = func(name string) string {
+		called = true
+		return ""
+	}
+	out := f.view()
+	if !called {
+		t.Error("preview callback not invoked")
+	}
+	if strings.Contains(out, "Preview of layout") {
+		t.Errorf("view should hide preview header on empty callback result:\n%s", out)
+	}
+}
+
+func TestForm_View_PreviewDefaultsToDefaultWhenTemplateBlank(t *testing.T) {
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x"})
+	f.inputs[fieldTemplate].SetValue("")
+	got := ""
+	f.preview = func(name string) string {
+		got = name
+		return "preview-body"
+	}
+	_ = f.view()
+	if got != "triple" {
+		t.Errorf("preview asked for %q, want %q (must mirror collect())", got, "triple")
+	}
+}
+
+func TestForm_View_NoPreviewWhenCallbackNil(t *testing.T) {
+	// Most callers (delete, save) never wire a previewer. The form
+	// must still render cleanly with no preview block at all.
+	f := newFormModel(FormDefaults{Name: "a", Dir: "/x", Template: "dev"})
+	out := f.view()
+	if strings.Contains(out, "Preview of layout") {
+		t.Errorf("view should not render preview header without a callback:\n%s", out)
+	}
+}
+
+func contains(haystack, needle string) bool {
+	return len(haystack) >= len(needle) && indexOf(haystack, needle) >= 0
+}
+
+func indexOf(haystack, needle string) int {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return i
+		}
+	}
+	return -1
 }

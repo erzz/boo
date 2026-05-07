@@ -11,7 +11,7 @@
 //	$XDG_DATA_HOME/boo/     (default ~/.local/share/boo)
 //	  projects.toml         — registry index
 //	  projects/<name>/
-//	    layout.toml         — resolved layout snapshot
+//	    layout.yaml         — resolved layout snapshot
 //	    state.json          — runtime state (last WindowID, last-launched-at)
 package state
 

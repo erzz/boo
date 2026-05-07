@@ -2,12 +2,13 @@
 //
 // `boo new --layout <name>` resolves the layout in this order:
 //
-//  1. User template at $XDG_CONFIG_HOME/boo/layouts/<name>.toml (if present).
-//  2. Built-in template embedded in the binary (currently "default" and "dev").
+//  1. User template at $XDG_CONFIG_HOME/boo/layouts/<name>.yaml (if present).
+//  2. Built-in template embedded in the binary (the curated `1x1x1`,
+//     `1x2x1`, `1x1x2`, `1x2x2`, `2x1x1`, `2x2x1`, `2x2x2`, plus `triple`).
 //
 // Built-ins ensure `boo new` works on a clean machine. User templates always
-// win on name collision so users can override even "default" by dropping their
-// own default.toml in the layouts dir.
+// win on name collision so users can override even built-ins by dropping a
+// file with the same name in their layouts dir.
 
 package layout
 
@@ -33,10 +34,17 @@ const (
 )
 
 // ResolvedTemplate is a layout template plus where it was loaded from.
+//
+// Description is the leading-comment block from the source TOML
+// (extracted before parsing, since the TOML parser strips comments).
+// It is purely template metadata for `boo layouts` and the new-project
+// preview — it is NOT carried into the runtime layout files written
+// per project. See extractDescription for the format we recognise.
 type ResolvedTemplate struct {
-	Layout Layout
-	Source TemplateSource
-	Path   string // absolute path for SourceUser, embed path for SourceBuiltin
+	Layout      Layout
+	Source      TemplateSource
+	Path        string // absolute path for SourceUser, embed path for SourceBuiltin
+	Description string
 }
 
 // ResolveTemplate looks up the named layout template. layoutsDir may be empty,
@@ -44,7 +52,7 @@ type ResolvedTemplate struct {
 func ResolveTemplate(layoutsDir, name string) (ResolvedTemplate, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = "default"
+		name = "triple"
 	}
 	if err := validTemplateName(name); err != nil {
 		return ResolvedTemplate{}, err
@@ -52,7 +60,7 @@ func ResolveTemplate(layoutsDir, name string) (ResolvedTemplate, error) {
 
 	// 1. User template.
 	if layoutsDir != "" {
-		path := filepath.Join(layoutsDir, name+".toml")
+		path := filepath.Join(layoutsDir, name+".yaml")
 		if data, err := os.ReadFile(path); err == nil {
 			l, perr := Parse(data)
 			if perr != nil {
@@ -61,18 +69,23 @@ func ResolveTemplate(layoutsDir, name string) (ResolvedTemplate, error) {
 			if l.Name == "" {
 				l.Name = name
 			}
-			return ResolvedTemplate{Layout: l, Source: SourceUser, Path: path}, nil
+			return ResolvedTemplate{
+				Layout:      l,
+				Source:      SourceUser,
+				Path:        path,
+				Description: extractDescription(data),
+			}, nil
 		} else if !os.IsNotExist(err) {
 			return ResolvedTemplate{}, fmt.Errorf("layout template %s: %w", path, err)
 		}
 	}
 
 	// 2. Built-in.
-	embedPath := "templates/" + name + ".toml"
+	embedPath := "templates/" + name + ".yaml"
 	data, err := bundledTemplates.ReadFile(embedPath)
 	if err != nil {
 		return ResolvedTemplate{}, fmt.Errorf("layout template %q not found (no user template at %s, no built-in)",
-			name, filepath.Join(layoutsDir, name+".toml"))
+			name, filepath.Join(layoutsDir, name+".yaml"))
 	}
 	l, perr := Parse(data)
 	if perr != nil {
@@ -81,7 +94,52 @@ func ResolveTemplate(layoutsDir, name string) (ResolvedTemplate, error) {
 	if l.Name == "" {
 		l.Name = name
 	}
-	return ResolvedTemplate{Layout: l, Source: SourceBuiltin, Path: embedPath}, nil
+	return ResolvedTemplate{
+		Layout:      l,
+		Source:      SourceBuiltin,
+		Path:        embedPath,
+		Description: extractDescription(data),
+	}, nil
+}
+
+// extractDescription pulls a human-readable description out of the
+// leading comment block of a TOML template.
+//
+// Rules:
+//   - Only consecutive lines from the very top of the file count.
+//     The block ends at the first non-comment, non-blank line.
+//   - Each line must start with '#' (with optional leading whitespace).
+//     A single leading space after the '#' is stripped for readability,
+//     so `# foo` and `#foo` both yield `foo`.
+//   - A blank comment line (`#` alone) marks a paragraph break and is
+//     emitted as a blank line in the output.
+//   - Trailing blank paragraph lines are trimmed.
+//
+// Returns "" if no leading comment block is present. This keeps the
+// `boo layouts` listing tidy for templates that don't bother with a
+// description — they get name + path only.
+func extractDescription(data []byte) string {
+	var lines []string
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			// Blank lines between comment lines end the block. We
+			// only want the very first contiguous block.
+			break
+		}
+		if !strings.HasPrefix(line, "#") {
+			break
+		}
+		// Strip the '#' and at most one space.
+		stripped := strings.TrimPrefix(line, "#")
+		stripped = strings.TrimPrefix(stripped, " ")
+		lines = append(lines, stripped)
+	}
+	// Trim trailing blanks (a "# " at the end of the block).
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ListTemplates returns the union of built-in and user template names, sorted.
@@ -98,7 +156,7 @@ func ListTemplates(layoutsDir string) ([]string, error) {
 		if e.IsDir() {
 			continue
 		}
-		if name, ok := stripTOML(e.Name()); ok {
+		if name, ok := stripYAMLExt(e.Name()); ok {
 			seen[name] = struct{}{}
 		}
 	}
@@ -113,7 +171,7 @@ func ListTemplates(layoutsDir string) ([]string, error) {
 			if e.IsDir() {
 				continue
 			}
-			if name, ok := stripTOML(e.Name()); ok {
+			if name, ok := stripYAMLExt(e.Name()); ok {
 				seen[name] = struct{}{}
 			}
 		}
@@ -127,11 +185,11 @@ func ListTemplates(layoutsDir string) ([]string, error) {
 	return out, nil
 }
 
-func stripTOML(filename string) (string, bool) {
-	if !strings.HasSuffix(filename, ".toml") {
+func stripYAMLExt(filename string) (string, bool) {
+	if !strings.HasSuffix(filename, ".yaml") {
 		return "", false
 	}
-	return strings.TrimSuffix(filename, ".toml"), true
+	return strings.TrimSuffix(filename, ".yaml"), true
 }
 
 // validTemplateName rejects path traversal and anything that isn't a plain

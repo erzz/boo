@@ -6,9 +6,9 @@ Switch between project-scoped Ghostty windows by name. Each project remembers it
 
 ```
 boo projA          # open or focus the projA window
-boo                # if you're cd'd inside a known project, switch to it
-boo pick           # fuzzy picker over all known projects
+boo                # fuzzy picker over all known projects
 boo new projA      # register a project (existing dir or clone from URL)
+boo save           # snapshot the focused window's layout for the current project
 boo list           # show all projects
 boo doctor         # sanity-check your environment
 ```
@@ -21,7 +21,7 @@ Pre-alpha. Under active development. macOS only.
 
 boo drives Ghostty via its native AppleScript / JXA API. There is no tmux, no terminal multiplexer, no leaky abstraction — splits are Ghostty splits, scrollback is Ghostty scrollback, everything Ghostty does just works. Windows you opened with boo stay open across switches, so the processes inside them keep running.
 
-See [`DESIGN.md`](./DESIGN.md) for architecture and [`SPIKE.md`](./SPIKE.md) for why this approach was chosen.
+See [`DESIGN.md`](./DESIGN.md) for architecture, [`docs/layouts.md`](./docs/layouts.md) for the layout TOML reference and copy-paste examples (Node, Go, Rust, Python), and [`SPIKE.md`](./SPIKE.md) for why this approach was chosen.
 
 ## Requirements
 

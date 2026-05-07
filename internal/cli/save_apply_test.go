@@ -30,11 +30,17 @@ func lossyDiff() SaveDiff {
 }
 
 func oneTabDiff() []TabDiff {
+	// Prev: single leaf. Next: row of two leaves. Same-name tab so the
+	// renderer prints "main" in the diff (asserted by the structural and
+	// lossy tests).
 	return []TabDiff{{
 		Index: 0,
 		Name:  "main",
-		Prev:  &layout.Tab{Name: "main", Splits: []layout.Split{{Cwd: "."}}},
-		Next:  &layout.Tab{Name: "main", Splits: []layout.Split{{Cwd: "."}, {Direction: layout.DirRight, Cwd: "."}}},
+		Prev:  &layout.Tab{Name: "main", Root: layout.Split{Cwd: "."}},
+		Next: &layout.Tab{Name: "main", Root: layout.Split{
+			Direction: layout.DirRow,
+			Children:  []layout.Split{{Cwd: "."}, {Cwd: "."}},
+		}},
 	}}
 }
 

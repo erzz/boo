@@ -1,0 +1,26 @@
+# Single tab with a 1-on-the-left, 2-stacked-on-the-right shape.
+# Useful when you want one big workspace (editor / primary task)
+# plus two smaller side panes (logs, watch output, secondary shell).
+#
+# The named exception in boo's layout catalogue: the rest of the
+# built-ins use the `tabs × cols × rows` schema (e.g. `1x2x2`),
+# which only describes uniform grids. `triple` is a 1+2 asymmetric
+# tree that doesn't fit the schema, so it gets its own name.
+#
+# Like the larger grids, this tree shape cannot be recovered by
+# `boo save`: Ghostty's AppleScript API returns a flat list of
+# terminals per tab, so re-saving will flatten the 1+2 tree into
+# a row of three. Hand-authored layouts like this one are
+# reapplied verbatim on every launch — that's why they exist.
+
+name: triple
+tabs:
+  - name: main
+    split:
+      direction: row
+      children:
+        - cwd: .
+        - direction: column
+          children:
+            - cwd: .
+            - cwd: .

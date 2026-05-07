@@ -81,6 +81,8 @@ form pre-population and the user can edit before submitting.`,
 			res, err := picker.Run(nil, picker.Options{
 				Defaults:                 defs,
 				SkipListGoStraightToForm: true,
+				PreviewTemplate:          templatePreviewer(a),
+				LayoutNames:              templateNames(a),
 			})
 			if err != nil {
 				return err

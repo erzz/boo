@@ -46,6 +46,7 @@ Run 'boo doctor' to verify your environment.`,
 		newFzfCmd(),
 		newDeleteCmd(),
 		newSaveCmd(),
+		newLayoutsCmd(),
 	)
 
 	return root

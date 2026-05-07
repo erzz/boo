@@ -81,13 +81,22 @@ func TestOpenLayout_PassesLayoutAsStdinJSON(t *testing.T) {
 	c := New(fake)
 	res, err := c.OpenLayout(context.Background(), OpenLayoutParams{
 		Tabs: []LayoutTab{
-			{Name: "edit", Splits: []LayoutSplit{
-				{WorkingDirectory: "/projA", Command: "nvim ."},
-			}},
-			{Name: "run", Splits: []LayoutSplit{
-				{WorkingDirectory: "/projA"},
-				{Direction: "right", WorkingDirectory: "/projA", Command: "npm run dev"},
-			}},
+			{
+				Name: "edit",
+				// Single-leaf tab: root is itself a leaf.
+				Root: LayoutSplit{WorkingDirectory: "/projA", Command: "nvim ."},
+			},
+			{
+				Name: "run",
+				// Two-pane row: root is interior with two leaves.
+				Root: LayoutSplit{
+					Direction: "row",
+					Children: []LayoutSplit{
+						{WorkingDirectory: "/projA"},
+						{WorkingDirectory: "/projA", Command: "npm run dev"},
+					},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -100,7 +109,8 @@ func TestOpenLayout_PassesLayoutAsStdinJSON(t *testing.T) {
 	for _, want := range []string{
 		`"name":"edit"`,
 		`"name":"run"`,
-		`"direction":"right"`,
+		`"direction":"row"`,
+		`"children":[`,
 		`"command":"npm run dev"`,
 		`"workingDirectory":"/projA"`,
 	} {
@@ -123,13 +133,13 @@ func TestOpenLayout_RejectsEmptyTabs(t *testing.T) {
 
 func TestOpenLayout_PropagatesScriptError(t *testing.T) {
 	fake := booexec.NewFake(func(_ string, _ []string, _ []byte) ([]byte, []byte, error) {
-		return []byte(`{"error":"non-primary split missing direction (tab 0 split 1)"}`), nil, nil
+		return []byte(`{"error":"interior node must have exactly 2 children"}`), nil, nil
 	})
 	c := New(fake)
 	_, err := c.OpenLayout(context.Background(), OpenLayoutParams{
-		Tabs: []LayoutTab{{Splits: []LayoutSplit{{}, {}}}},
+		Tabs: []LayoutTab{{Root: LayoutSplit{}}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "missing direction") {
+	if err == nil || !strings.Contains(err.Error(), "exactly 2 children") {
 		t.Fatalf("expected propagated error, got %v", err)
 	}
 }

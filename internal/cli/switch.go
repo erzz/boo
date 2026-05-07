@@ -112,23 +112,39 @@ func openProjectWindow(ctx context.Context, a *app, p project.Project) (*ghostty
 }
 
 // layoutToParams projects a layout.Layout into the JSON shape OpenLayout
-// expects, resolving every split's cwd against the project root.
+// expects, resolving every leaf's cwd against the project root.
 func layoutToParams(projectDir string, l layout.Layout) ghostty.OpenLayoutParams {
 	tabs := make([]ghostty.LayoutTab, len(l.Tabs))
 	for i, t := range l.Tabs {
-		splits := make([]ghostty.LayoutSplit, len(t.Splits))
-		for j, s := range t.Splits {
-			splits[j] = ghostty.LayoutSplit{
-				Direction:        s.Direction,
-				WorkingDirectory: resolveLayoutCwd(projectDir, s.Cwd),
-				Command:          s.Command,
-				InitialInput:     s.InitialInput,
-				Env:              s.Env,
-			}
+		tabs[i] = ghostty.LayoutTab{
+			Name: t.Name,
+			Root: splitToParams(projectDir, t.Root),
 		}
-		tabs[i] = ghostty.LayoutTab{Name: t.Name, Splits: splits}
 	}
 	return ghostty.OpenLayoutParams{Tabs: tabs}
+}
+
+// splitToParams recursively converts a layout.Split tree into the
+// ghostty.LayoutSplit tree the JXA walker consumes. Leaves get their cwd
+// resolved against the project root; interior nodes carry direction +
+// recursively-converted children only.
+func splitToParams(projectDir string, s layout.Split) ghostty.LayoutSplit {
+	if s.IsLeaf() {
+		return ghostty.LayoutSplit{
+			WorkingDirectory: resolveLayoutCwd(projectDir, s.Cwd),
+			Command:          s.Command,
+			InitialInput:     s.InitialInput,
+			Env:              s.Env,
+		}
+	}
+	children := make([]ghostty.LayoutSplit, len(s.Children))
+	for i, c := range s.Children {
+		children[i] = splitToParams(projectDir, c)
+	}
+	return ghostty.LayoutSplit{
+		Direction: s.Direction,
+		Children:  children,
+	}
 }
 
 func updateLaunchTime(a *app, name string, rt project.Runtime) error {

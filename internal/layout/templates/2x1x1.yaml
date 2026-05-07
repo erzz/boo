@@ -1,0 +1,12 @@
+# Two tabs, each a single shell. Useful when you want a clean
+# divide between two contexts (e.g. tab 0 = main repo, tab 1 = a
+# scratchpad / utility shell) but don't want any splitting.
+
+name: 2x1x1
+tabs:
+  - name: main
+    split:
+      cwd: .
+  - name: scratch
+    split:
+      cwd: .

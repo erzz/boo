@@ -13,9 +13,7 @@ func TestRenderTabDiff_StructuralAdd(t *testing.T) {
 		Index: 1,
 		Name:  "logs",
 		Prev:  nil,
-		Next: &layout.Tab{Name: "logs", Splits: []layout.Split{
-			{Cwd: "logs"},
-		}},
+		Next:  &layout.Tab{Name: "logs", Root: layout.Split{Cwd: "logs"}},
 	}
 	got := renderTabDiff(td)
 	// Sanity: contains the title, the "(removed)" placeholder for prev,
@@ -32,24 +30,35 @@ func TestRenderTabDiff_StructuralAdd(t *testing.T) {
 	}
 }
 
-func TestRenderTabDiff_LossyMarksAffectedCells(t *testing.T) {
+func TestRenderTabDiff_LossyMarksAffectedLeaves(t *testing.T) {
+	// Prev: row(., logs-with-cmd). Next: row(., logs) — command dropped.
+	// Leaf 1 is lossy. The renderer should mark it with "L1 !" on the
+	// label row of the LEFT (prev) side; the right side carries no '!'
+	// because the post-save shape isn't lossy (the loss already happened).
 	td := TabDiff{
 		Index: 0,
 		Name:  "run",
-		Prev: &layout.Tab{Name: "run", Splits: []layout.Split{
-			{Cwd: "."},
-			{Direction: layout.DirDown, Cwd: "logs"},
+		Prev: &layout.Tab{Name: "run", Root: layout.Split{
+			Direction: layout.DirRow,
+			Children: []layout.Split{
+				{Cwd: "."},
+				{Cwd: "logs", Command: "tail -f"},
+			},
 		}},
-		Next: &layout.Tab{Name: "run", Splits: []layout.Split{
-			{Cwd: "."},
-			{Direction: layout.DirRight, Cwd: "logs"},
+		Next: &layout.Tab{Name: "run", Root: layout.Split{
+			Direction: layout.DirRow,
+			Children:  []layout.Split{{Cwd: "."}, {Cwd: "logs"}},
 		}},
-		LossyCells: []int{1},
+		LossyLeaves: []int{1},
 	}
 	got := renderTabDiff(td)
-	// The lossy cell should carry a trailing '!' on its label row.
-	if !strings.Contains(got, "down !") && !strings.Contains(got, "down  !") {
-		t.Errorf("expected 'down !' marker on lossy cell, got:\n%s", got)
+	// The lossy leaf carries a trailing '!' on its label cell.
+	if !strings.Contains(got, "L1 !") {
+		t.Errorf("expected 'L1 !' marker on lossy leaf, got:\n%s", got)
+	}
+	// Left side should also still show the (cmd) annotation on leaf 1.
+	if !strings.Contains(got, "(cmd)") {
+		t.Errorf("expected '(cmd)' annotation on prev leaf 1, got:\n%s", got)
 	}
 	// On every row that contains the arrow, the right side (after the
 	// arrow) should not contain '!' — the post-save shape isn't lossy.
@@ -79,17 +88,20 @@ func TestRenderDiff_LossyHeaderAndReasons(t *testing.T) {
 		ChangedTabs: []TabDiff{{
 			Index: 0,
 			Name:  "run",
-			Prev: &layout.Tab{Name: "run", Splits: []layout.Split{
-				{Cwd: "."},
-				{Direction: layout.DirDown, Cwd: "logs"},
+			Prev: &layout.Tab{Name: "run", Root: layout.Split{
+				Direction: layout.DirRow,
+				Children: []layout.Split{
+					{Cwd: "."},
+					{Cwd: "logs", Command: "tail -f"},
+				},
 			}},
-			Next: &layout.Tab{Name: "run", Splits: []layout.Split{
-				{Cwd: "."},
-				{Direction: layout.DirRight, Cwd: "logs"},
+			Next: &layout.Tab{Name: "run", Root: layout.Split{
+				Direction: layout.DirRow,
+				Children:  []layout.Split{{Cwd: "."}, {Cwd: "logs"}},
 			}},
-			LossyCells: []int{1},
+			LossyLeaves: []int{1},
 		}},
-		LossReasons: []string{`tab 0 ("run") split 1: direction = "down" will be saved as "right"`},
+		LossReasons: []string{`tab 0 ("run") leaf 1: command "tail -f" will be lost`},
 	}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "CANNOT be recovered") {
@@ -98,7 +110,7 @@ func TestRenderDiff_LossyHeaderAndReasons(t *testing.T) {
 	if !strings.Contains(out, "Unrecoverable on next save:") {
 		t.Errorf("expected 'Unrecoverable on next save:' section, got:\n%s", out)
 	}
-	if !strings.Contains(out, "direction = \"down\"") {
+	if !strings.Contains(out, `command "tail -f"`) {
 		t.Errorf("expected loss reason in body, got:\n%s", out)
 	}
 }

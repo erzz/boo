@@ -31,12 +31,12 @@ func SaveLayout(p state.Paths, name string, l layout.Layout) error {
 	if err != nil {
 		return err
 	}
-	return state.WriteAtomic(filepath.Join(p.ProjectDir(name), "layout.toml"), data)
+	return state.WriteAtomic(filepath.Join(p.ProjectDir(name), "layout.yaml"), data)
 }
 
 // LoadLayout reads the resolved layout snapshot for project name.
 func LoadLayout(p state.Paths, name string) (layout.Layout, error) {
-	path := filepath.Join(p.ProjectDir(name), "layout.toml")
+	path := filepath.Join(p.ProjectDir(name), "layout.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return layout.Layout{}, fmt.Errorf("project: read layout %s: %w", path, err)

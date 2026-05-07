@@ -1,0 +1,13 @@
+# One tab, one column, two rows. Top pane stacked over bottom pane.
+# Useful when horizontal screen real estate is precious (laptop in
+# portrait, narrow window) or when the work flows top-down: command
+# above, output below.
+
+name: 1x1x2
+tabs:
+  - name: main
+    split:
+      direction: column
+      children:
+        - cwd: .
+        - cwd: .

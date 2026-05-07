@@ -216,24 +216,42 @@ func (c *Client) FocusWindow(ctx context.Context, windowID string) error {
 	return nil
 }
 
-// LayoutSplit is one terminal surface in a layout being rendered.
+// LayoutSplit is a node in a tab's split tree.
 //
-// Direction is empty for the primary split of each tab and one of
-// "right"|"left"|"up"|"down" for subsequent splits. WorkingDirectory is the
-// already-resolved absolute path; layout-relative resolution happens in the
-// caller.
+// A node is either a *leaf* (no children, may carry WorkingDirectory /
+// Command / InitialInput / Env) or an *interior* node (Direction is "row"
+// or "column", Children is non-empty, all other fields are ignored).
+//
+// Row means children are laid out left-to-right; column means top-to-bottom.
+// The JXA side walks this tree recursively: it materialises the first leaf
+// it descends into as the seed terminal for the tab, then for each
+// subsequent leaf it splits the most recently materialised sibling in the
+// parent's direction.
 type LayoutSplit struct {
-	Direction        string            `json:"direction,omitempty"`
+	// Interior fields.
+	Direction string        `json:"direction,omitempty"`
+	Children  []LayoutSplit `json:"children,omitempty"`
+
+	// Leaf fields.
 	WorkingDirectory string            `json:"workingDirectory,omitempty"`
 	Command          string            `json:"command,omitempty"`
 	InitialInput     string            `json:"initialInput,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
 }
 
-// LayoutTab is one tab in a layout being rendered.
+// LayoutTab is one tab in a layout being rendered. Root is the tab's
+// split tree (leaf for a single-pane tab, interior node otherwise).
+//
+// Name is shipped to JXA but currently ignored on open: Ghostty 1.3.x
+// marks tab/terminal name as read-only in its AppleScript dictionary
+// and the only title-setting action (prompt_surface_title) is
+// interactive. The field is kept (and round-tripped through save) so
+// hand-authored YAML stays the source of truth — when Ghostty exposes
+// a non-interactive title action, open_layout.js will start honouring
+// it without any schema change here.
 type LayoutTab struct {
-	Name   string        `json:"name,omitempty"`
-	Splits []LayoutSplit `json:"splits"`
+	Name string      `json:"name,omitempty"`
+	Root LayoutSplit `json:"root"`
 }
 
 // OpenLayoutParams is the input for OpenLayout. Tabs is rendered left-to-right

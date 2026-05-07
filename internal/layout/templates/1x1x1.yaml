@@ -1,0 +1,11 @@
+# Single shell at the project root. One tab, one column, one row —
+# the simplest possible layout. Use when you don't want any opinions
+# imposed: no commands, no extra panes, just a place to type.
+#
+# This is the layout `boo new` picks when --layout is omitted.
+
+name: 1x1x1
+tabs:
+  - name: shell
+    split:
+      cwd: .

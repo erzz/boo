@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/erzz/boo/internal/layout"
+	"github.com/erzz/boo/internal/layoutpreview"
 	"github.com/erzz/boo/internal/picker"
 	"github.com/erzz/boo/internal/project"
 )
@@ -74,7 +76,9 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	}
 
 	res, err := picker.Run(items, picker.Options{
-		Defaults: defs,
+		Defaults:        defs,
+		PreviewTemplate: templatePreviewer(a),
+		LayoutNames:     templateNames(a),
 	})
 	if err != nil {
 		return err
@@ -196,4 +200,45 @@ func runFzf(ctx context.Context, args []string, stdin string) ([]byte, error) {
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Stderr = os.Stderr
 	return cmd.Output()
+}
+
+// templatePreviewer returns a callback suitable for picker.Options.PreviewTemplate.
+// It resolves the template name through the same path `boo new` will use,
+// then renders it via internal/layoutpreview. Empty result on any error so
+// the form silently hides the preview while the user is mid-typing an
+// unknown name — surfacing a stack trace inside a TUI form would be hostile.
+//
+// previewWidth (50) matches `boo layouts` so what the user sees in the form
+// is byte-identical to what they'd see from the command line.
+func templatePreviewer(a *app) func(string) string {
+	const previewWidth = 50
+	return func(name string) string {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return ""
+		}
+		r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, name)
+		if err != nil {
+			return ""
+		}
+		return layoutpreview.RenderLayout(r.Layout, previewWidth)
+	}
+}
+
+// templateNames returns the list of layout template names visible to
+// `boo new` (built-ins + any user overrides), suitable for
+// picker.Options.LayoutNames so the TUI can render the Layout field
+// as a left/right cycler instead of a free-text input.
+//
+// On any error reading the user templates dir we silently return nil,
+// which falls back to the legacy free-text input. The form preview
+// already silently hides on resolve errors, so the user can still
+// type a known name and see it work. We never want a transient I/O
+// error to make `boo new`'s TUI unusable.
+func templateNames(a *app) []string {
+	names, err := layout.ListTemplates(a.Paths.LayoutsDir)
+	if err != nil {
+		return nil
+	}
+	return names
 }

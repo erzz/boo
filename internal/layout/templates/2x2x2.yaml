@@ -1,0 +1,37 @@
+# Two tabs, each a 2x2 grid. Eight panes total — past what most
+# screens accommodate comfortably, included mostly for completeness
+# and as a stress test of the renderer / JXA walker. If you find
+# yourself reaching for this, consider whether two 1x2x2 windows in
+# different projects would be easier to reason about.
+#
+# Like 1x2x2, the tree shape is unrecoverable via `boo save` — the
+# capture path will flatten each tab's grid into a flat row of four.
+# Hand-author this file (or its derivatives) and don't rely on save
+# to round-trip the structure.
+
+name: 2x2x2
+tabs:
+  - name: main
+    split:
+      direction: row
+      children:
+        - direction: column
+          children:
+            - cwd: .
+            - cwd: .
+        - direction: column
+          children:
+            - cwd: .
+            - cwd: .
+  - name: secondary
+    split:
+      direction: row
+      children:
+        - direction: column
+          children:
+            - cwd: .
+            - cwd: .
+        - direction: column
+          children:
+            - cwd: .
+            - cwd: .

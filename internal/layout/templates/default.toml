@@ -1,7 +1,0 @@
-name = "default"
-
-[[tab]]
-name = "shell"
-
-  [[tab.split]]
-  cwd = "."

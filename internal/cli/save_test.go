@@ -5,11 +5,15 @@ import (
 	"testing"
 
 	"github.com/erzz/boo/internal/ghostty"
+	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/project"
 )
 
 func TestCapturedToLayout_BasicShape(t *testing.T) {
-	p := project.Project{Name: "demo", Dir: "/tmp/projA", Layout: "default"}
+	// Tab 0: 1 terminal → leaf root.
+	// Tab 1: 2 terminals → row(leaf, leaf) (the "flat tree" produced
+	// by buildFlatRoot for N>=2).
+	p := project.Project{Name: "demo", Dir: "/tmp/projA", Layout: "1x1x1"}
 	desc := &ghostty.DescribedWindow{
 		Tabs: []ghostty.DescribedTab{
 			{Name: "edit", Terminals: []ghostty.DescribedTerminal{
@@ -25,36 +29,58 @@ func TestCapturedToLayout_BasicShape(t *testing.T) {
 	if err := got.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if got.Name != "default" {
-		t.Errorf("name = %q, want default", got.Name)
+	if got.Name != "1x1x1" {
+		t.Errorf("name = %q, want 1x1x1", got.Name)
 	}
 	if len(got.Tabs) != 2 {
 		t.Fatalf("tabs = %d, want 2", len(got.Tabs))
 	}
-	if got.Tabs[0].Splits[0].Cwd != "." {
-		t.Errorf("first split cwd = %q, want '.'", got.Tabs[0].Splits[0].Cwd)
+
+	// Tab 0: single-leaf root.
+	tab0 := got.Tabs[0]
+	if !tab0.Root.IsLeaf() {
+		t.Errorf("tab 0 root should be a leaf for 1 terminal, got %+v", tab0.Root)
 	}
-	if got.Tabs[1].Splits[1].Direction != "right" {
-		t.Errorf("non-primary direction = %q, want right", got.Tabs[1].Splits[1].Direction)
+	if tab0.Root.Cwd != "." {
+		t.Errorf("tab 0 cwd = %q, want '.'", tab0.Root.Cwd)
 	}
-	if got.Tabs[1].Splits[1].Cwd != "logs" {
-		t.Errorf("relative cwd = %q, want 'logs'", got.Tabs[1].Splits[1].Cwd)
+
+	// Tab 1: row(leaf, leaf).
+	tab1 := got.Tabs[1]
+	if tab1.Root.IsLeaf() {
+		t.Fatalf("tab 1 root should be interior for 2 terminals, got leaf %+v", tab1.Root)
 	}
-	// First split of any tab must NOT have a direction.
-	for i, tab := range got.Tabs {
-		if tab.Splits[0].Direction != "" {
-			t.Errorf("tab %d primary split has direction %q", i, tab.Splits[0].Direction)
+	if tab1.Root.Direction != layout.DirRow {
+		t.Errorf("tab 1 root direction = %q, want row", tab1.Root.Direction)
+	}
+	leaves := collectLeaves(tab1.Root)
+	if len(leaves) != 2 {
+		t.Fatalf("tab 1 leaves = %d, want 2", len(leaves))
+	}
+	if leaves[0].Cwd != "." {
+		t.Errorf("tab 1 leaf 0 cwd = %q, want '.'", leaves[0].Cwd)
+	}
+	if leaves[1].Cwd != "logs" {
+		t.Errorf("tab 1 leaf 1 cwd = %q, want 'logs'", leaves[1].Cwd)
+	}
+
+	// Leaves carry no Direction (direction is interior-only).
+	for ti, tb := range got.Tabs {
+		for li, lf := range collectLeaves(tb.Root) {
+			if lf.Direction != "" {
+				t.Errorf("tab %d leaf %d has direction %q (leaves must not)", ti, li, lf.Direction)
+			}
 		}
 	}
-	// capturedToLayout should be quiet for healthy input. Defensive
-	// warnings (e.g. dropped empty tabs) are covered in their own test.
+
+	// capturedToLayout should be quiet for healthy input.
 	if len(warnings) != 0 {
 		t.Errorf("expected no warnings, got: %v", warnings)
 	}
 }
 
 func TestCapturedToLayout_AbsolutePathsOutsideProjectAreKept(t *testing.T) {
-	p := project.Project{Name: "demo", Dir: "/tmp/projA", Layout: "default"}
+	p := project.Project{Name: "demo", Dir: "/tmp/projA", Layout: "1x1x1"}
 	desc := &ghostty.DescribedWindow{
 		Tabs: []ghostty.DescribedTab{
 			{Name: "edit", Terminals: []ghostty.DescribedTerminal{
@@ -63,13 +89,13 @@ func TestCapturedToLayout_AbsolutePathsOutsideProjectAreKept(t *testing.T) {
 		},
 	}
 	got, _ := capturedToLayout(p, desc)
-	if got.Tabs[0].Splits[0].Cwd != "/var/log" {
-		t.Fatalf("cwd = %q, want /var/log (outside project root)", got.Tabs[0].Splits[0].Cwd)
+	if got.Tabs[0].Root.Cwd != "/var/log" {
+		t.Fatalf("cwd = %q, want /var/log (outside project root)", got.Tabs[0].Root.Cwd)
 	}
 }
 
 func TestCapturedToLayout_DropsEmptyTabs(t *testing.T) {
-	p := project.Project{Name: "demo", Dir: "/tmp/projA", Layout: "default"}
+	p := project.Project{Name: "demo", Dir: "/tmp/projA", Layout: "1x1x1"}
 	desc := &ghostty.DescribedWindow{
 		Tabs: []ghostty.DescribedTab{
 			{Name: "good", Terminals: []ghostty.DescribedTerminal{

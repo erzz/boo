@@ -56,6 +56,25 @@ type Options struct {
 	// like `boo delete` where creating a new project from the picker would
 	// make no sense.
 	HideNewProject bool
+	// PreviewTemplate, if set, is called whenever the form's "Layout
+	// template" field changes; the returned string is rendered below the
+	// form as a preview of what the layout will look like. Empty return =
+	// no preview shown (e.g. unknown template name while the user types).
+	//
+	// We pass a callback rather than importing the layout package here so
+	// the picker stays free of project-specific dependencies — the same
+	// reason Item, FormDefaults etc. don't reference internal/project or
+	// internal/ghostty.
+	PreviewTemplate func(name string) string
+	// LayoutNames, if non-empty, turns the form's "Layout template" field
+	// from a free-text input into a left/right cycler over this list. The
+	// CLI populates it from layout.ListTemplates so users see exactly the
+	// templates they have available (built-ins + any user overrides) and
+	// can't typo their way into a validation error after submit.
+	//
+	// Empty = back to the legacy free-text input. Useful for tests and
+	// for any future caller that wants the old behaviour.
+	LayoutNames []string
 }
 
 // Run shows the TUI and blocks until the user makes a decision.
@@ -87,6 +106,8 @@ func Run(items []Item, opts Options) (Result, error) {
 	}
 
 	form := newFormModel(opts.Defaults)
+	form.preview = opts.PreviewTemplate
+	form.setLayoutNames(opts.LayoutNames)
 
 	scr := screenList
 	formOnly := opts.SkipListGoStraightToForm

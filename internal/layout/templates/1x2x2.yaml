@@ -1,0 +1,24 @@
+# One tab, 2x2 grid of equal panes. Two columns side by side, each
+# split into two rows. Useful when you genuinely have four parallel
+# things going on (editor + REPL + logs + scratch shell).
+#
+# This is one of the layouts that REQUIRES hand-authoring. Ghostty's
+# AppleScript API returns a flat list of terminals per tab on save,
+# so re-saving a 2x2 grid will flatten it into a row of four. The
+# tree shape lives in this file and is reapplied verbatim on every
+# `boo <project>`.
+
+name: 1x2x2
+tabs:
+  - name: main
+    split:
+      direction: row
+      children:
+        - direction: column
+          children:
+            - cwd: .
+            - cwd: .
+        - direction: column
+          children:
+            - cwd: .
+            - cwd: .

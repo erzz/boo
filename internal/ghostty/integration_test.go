@@ -87,13 +87,20 @@ func TestIntegration_OpenLayout_MultiTabWithSplits(t *testing.T) {
 
 	res, err := c.OpenLayout(ctx, OpenLayoutParams{
 		Tabs: []LayoutTab{
-			{Name: "edit", Splits: []LayoutSplit{
-				{WorkingDirectory: "/tmp"},
-			}},
-			{Name: "run", Splits: []LayoutSplit{
-				{WorkingDirectory: "/tmp"},
-				{Direction: "right", WorkingDirectory: "/tmp"},
-			}},
+			{
+				Name: "edit",
+				Root: LayoutSplit{WorkingDirectory: "/tmp"},
+			},
+			{
+				Name: "run",
+				Root: LayoutSplit{
+					Direction: "row",
+					Children: []LayoutSplit{
+						{WorkingDirectory: "/tmp"},
+						{WorkingDirectory: "/tmp"},
+					},
+				},
+			},
 		},
 	})
 	if err != nil {

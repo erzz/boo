@@ -45,23 +45,27 @@ func renderDiff(d SaveDiff, w io.Writer) {
 	// explainer. Even a "clean" structural diff may be hiding a real
 	// loss the differ can't see: Ghostty's AppleScript dictionary
 	// returns a flat terminal list per tab, so a tree like
-	// `vertical → [horizontal, horizontal]` is captured as three
-	// row-of-three splits. The user never sees that flattening unless
-	// we tell them. Silent saves stay silent — we never reached this
-	// branch anyway.
+	// `column(row(A, B), row(C, D))` is captured as four leaves in a
+	// row. mergeForSave will preserve the previous tree shape when
+	// the leaf count matches; if it doesn't, the tab gets flattened
+	// into a right-chain row and that flattening shows up as a
+	// structural change. Silent saves stay silent — we never reached
+	// this branch anyway.
 	fmt.Fprintln(w, "Why this happens:")
 	fmt.Fprintln(w, "  Ghostty's AppleScript API returns a flat list of terminals per")
 	fmt.Fprintln(w, "  tab — it does not expose split direction, nesting, or the")
 	fmt.Fprintln(w, "  command/env that launched a terminal. boo can reopen the same")
-	fmt.Fprintln(w, "  number of panes with the same cwds, but any nested split tree")
-	fmt.Fprintln(w, "  will be flattened into a single row, and any field marked '!'")
-	fmt.Fprintln(w, "  above will be dropped.")
+	fmt.Fprintln(w, "  number of panes with the same cwds, but if the captured pane")
+	fmt.Fprintln(w, "  count differs from the previous layout the tree will be flattened")
+	fmt.Fprintln(w, "  into a right-leaning row, and any field marked '!' above will be")
+	fmt.Fprintln(w, "  dropped.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Recommended:")
-	fmt.Fprintln(w, "  If you rely on a specific split shape, command, or env, write a")
-	fmt.Fprintln(w, "  layout TOML by hand and use it via 'boo new --layout <name>' or")
-	fmt.Fprintln(w, "  by editing the project's layout.toml directly. Hand-authored")
-	fmt.Fprintln(w, "  layouts are reapplied verbatim on every launch.")
+	fmt.Fprintln(w, "  If you rely on a specific tree shape, command, or env, write a")
+	fmt.Fprintln(w, "  layout YAML by hand and use it via 'boo new --layout <name>' or")
+	fmt.Fprintln(w, "  by editing the project's layout.yaml directly. Hand-authored")
+	fmt.Fprintln(w, "  layouts are reapplied verbatim on every launch — and survive")
+	fmt.Fprintln(w, "  re-saves intact when the captured pane count matches.")
 	fmt.Fprintln(w)
 }
 
@@ -73,7 +77,7 @@ func renderDiff(d SaveDiff, w io.Writer) {
 // That keeps the output greppable, terminal-portable, and trivial to test
 // against golden strings.
 func renderTabDiff(td TabDiff) string {
-	left := renderTab(td.Prev, td.LossyCells)
+	left := renderTab(td.Prev, td.LossyLeaves)
 	right := renderTab(td.Next, nil)
 	title := fmt.Sprintf("Tab %d %s", td.Index, quotedOrEmpty(td.Name))
 
@@ -101,22 +105,32 @@ func renderTabDiff(td TabDiff) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// renderTab draws one side of the diff: a row of fixed-width cells plus
-// a label row showing the split's recovered properties (cwd; "(cmd)" if a
-// command will be set on apply; direction for non-primary splits). Cells
-// listed in lossyCells get a trailing "!" on the marker row.
+// renderTab draws one side of the diff as a row of fixed-width cells,
+// one per leaf in left-to-right depth-first order. Each cell shows:
+//   - cwd
+//   - "(cmd)" / "(input)" / "(env xN)" if the leaf carries that
+//   - leaf index "L0..LN" plus a trailing "!" for entries listed in
+//     lossyLeaves
+//
+// The flat-row presentation deliberately doesn't try to re-create the
+// 2-D tree shape — `internal/layoutpreview` does that for the catalogue
+// preview. Here the structural-change outcome and the "Why this
+// happens" footer carry the "the tree shape changed" message, and the
+// row format keeps before / after horizontally aligned for an easy
+// visual scan.
 //
 // A nil tab renders as "(removed)".
-func renderTab(t *layout.Tab, lossyCells []int) string {
+func renderTab(t *layout.Tab, lossyLeaves []int) string {
 	if t == nil {
 		return "(removed)"
 	}
-	if len(t.Splits) == 0 {
+	leaves := collectLeaves(t.Root)
+	if len(leaves) == 0 {
 		return "(empty tab)"
 	}
 
-	lossySet := make(map[int]bool, len(lossyCells))
-	for _, j := range lossyCells {
+	lossySet := make(map[int]bool, len(lossyLeaves))
+	for _, j := range lossyLeaves {
 		lossySet[j] = true
 	}
 
@@ -124,19 +138,19 @@ func renderTab(t *layout.Tab, lossyCells []int) string {
 		topB    strings.Builder
 		cwdB    strings.Builder
 		extraB  strings.Builder
-		dirB    strings.Builder
+		idxB    strings.Builder
 		bottomB strings.Builder
 	)
-	for j := range t.Splits {
+	for j := range leaves {
 		writeBorder(&topB, j == 0)
 		writeBorder(&bottomB, j == 0)
 	}
 
-	for j, s := range t.Splits {
+	for j, s := range leaves {
 		if j == 0 {
 			cwdB.WriteString("|")
 			extraB.WriteString("|")
-			dirB.WriteString("|")
+			idxB.WriteString("|")
 		}
 		cwdB.WriteString(padCell(displayCwd(s.Cwd)))
 		cwdB.WriteString("|")
@@ -152,25 +166,19 @@ func renderTab(t *layout.Tab, lossyCells []int) string {
 		extraB.WriteString(padCell(extra))
 		extraB.WriteString("|")
 
-		dirLabel := ""
-		if j > 0 {
-			dirLabel = s.Direction
-			if dirLabel == "" {
-				dirLabel = "?"
-			}
-		}
+		idxLabel := fmt.Sprintf("L%d", j)
 		if lossySet[j] {
-			dirLabel = strings.TrimSpace(dirLabel) + " !"
+			idxLabel += " !"
 		}
-		dirB.WriteString(padCell(dirLabel))
-		dirB.WriteString("|")
+		idxB.WriteString(padCell(idxLabel))
+		idxB.WriteString("|")
 	}
 
 	return strings.Join([]string{
 		topB.String(),
 		cwdB.String(),
 		extraB.String(),
-		dirB.String(),
+		idxB.String(),
 		bottomB.String(),
 	}, "\n")
 }

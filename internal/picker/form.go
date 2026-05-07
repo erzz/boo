@@ -63,12 +63,32 @@ func (f formField) label() string {
 
 // formModel is the new-project sub-screen. It owns four text inputs plus
 // a focus index.
+//
+// The Layout template field has two modes:
+//   - Free-text input (default, for tests and any caller that doesn't
+//     supply Options.LayoutNames). The textinput at inputs[fieldTemplate]
+//     is the source of truth.
+//   - Cycler over a known list (when layoutNames is non-empty). The
+//     textinput at inputs[fieldTemplate] is bypassed entirely; layoutIdx
+//     points into layoutNames. ←/→ (and h/l) cycle when the field is
+//     focused. The textinput's value is kept in sync as a fallback so
+//     collect() can read it the same way in both modes.
 type formModel struct {
 	inputs    []textinput.Model
 	focus     formField
 	gitRemote string
 	width     int
 	err       string
+	// preview, if set, is called with the current value of the Layout
+	// template field; the returned string is shown below the form. See
+	// Options.PreviewTemplate for the rationale (kept as a callback so
+	// the picker package doesn't import internal/layout).
+	preview func(name string) string
+
+	// layoutNames is the cycler's list of template names. Empty means
+	// the Layout field stays a plain text input. See setLayoutNames.
+	layoutNames []string
+	layoutIdx   int
 }
 
 func newFormModel(d FormDefaults) formModel {
@@ -86,9 +106,9 @@ func newFormModel(d FormDefaults) formModel {
 	inputs[fieldFrom] = mk("https://github.com/owner/repo (optional)", d.From)
 	tpl := d.Template
 	if tpl == "" {
-		tpl = "default"
+		tpl = "triple"
 	}
-	inputs[fieldTemplate] = mk("default", tpl)
+	inputs[fieldTemplate] = mk("triple", tpl)
 
 	inputs[fieldName].Focus()
 	return formModel{
@@ -107,6 +127,50 @@ func (f *formModel) setSize(width int) {
 	for i := range f.inputs {
 		f.inputs[i].Width = w
 	}
+}
+
+// setLayoutNames switches the Layout template field into cycler mode
+// over the supplied list. The currently-typed value (from defaults or
+// fallback text input) is preserved if it matches one of the names;
+// otherwise the cycler starts at index 0 and the input value is
+// updated to match.
+//
+// Calling with an empty / nil slice puts the field back into free-text
+// mode.
+func (f *formModel) setLayoutNames(names []string) {
+	if len(names) == 0 {
+		f.layoutNames = nil
+		f.layoutIdx = 0
+		return
+	}
+	f.layoutNames = names
+	current := strings.TrimSpace(f.inputs[fieldTemplate].Value())
+	f.layoutIdx = 0
+	for i, n := range names {
+		if n == current {
+			f.layoutIdx = i
+			break
+		}
+	}
+	// Keep the underlying textinput in sync so collect() reads the
+	// same value the cycler is showing — single source of truth at
+	// submit time.
+	f.inputs[fieldTemplate].SetValue(names[f.layoutIdx])
+}
+
+// cyclerActive reports whether the Layout field is currently in
+// cycler mode (i.e. setLayoutNames was called with a non-empty list).
+func (f *formModel) cyclerActive() bool { return len(f.layoutNames) > 0 }
+
+// cycleLayout moves the cycler by delta (-1 or +1), wraps around, and
+// updates the underlying textinput value.
+func (f *formModel) cycleLayout(delta int) {
+	if !f.cyclerActive() {
+		return
+	}
+	n := len(f.layoutNames)
+	f.layoutIdx = (f.layoutIdx + delta + n) % n
+	f.inputs[fieldTemplate].SetValue(f.layoutNames[f.layoutIdx])
 }
 
 // Update returns (next model, cmd, submitted, intent, cancelled).
@@ -134,7 +198,30 @@ func (f *formModel) update(msg tea.Msg) (tea.Cmd, bool, *NewProjectIntent, bool)
 			}
 			f.focusNext()
 			return nil, false, nil, false
+		case "left", "h":
+			// In cycler mode, ←/h cycles backwards through the layout
+			// list when the Layout field is focused. Outside cycler
+			// mode (or on other fields) we fall through and let the
+			// textinput handle the key — '←' moves the cursor inside
+			// the input, 'h' inserts the literal character.
+			if f.focus == fieldTemplate && f.cyclerActive() {
+				f.cycleLayout(-1)
+				return nil, false, nil, false
+			}
+		case "right", "l":
+			if f.focus == fieldTemplate && f.cyclerActive() {
+				f.cycleLayout(+1)
+				return nil, false, nil, false
+			}
 		}
+	}
+
+	// In cycler mode, the Layout field's textinput is fully bypassed —
+	// we don't want characters typed into it to silently override the
+	// cycler's value. All other fields (and the Layout field in
+	// fallback free-text mode) keep the normal textinput behaviour.
+	if f.focus == fieldTemplate && f.cyclerActive() {
+		return nil, false, nil, false
 	}
 
 	var cmd tea.Cmd
@@ -157,7 +244,7 @@ func (f *formModel) collect() (*NewProjectIntent, error) {
 	from := strings.TrimSpace(f.inputs[fieldFrom].Value())
 	tpl := strings.TrimSpace(f.inputs[fieldTemplate].Value())
 	if tpl == "" {
-		tpl = "default"
+		tpl = "triple"
 	}
 	if name == "" {
 		return nil, fmt.Errorf("name is required")
@@ -185,6 +272,28 @@ func (f *formModel) focusPrev() {
 	f.inputs[f.focus].Focus()
 }
 
+// renderCycler draws the Layout field as `‹  <name>  ›` when the
+// cycler is active. The arrows are styled subtly when the field is
+// not focused so the affordance is unambiguous when the user lands
+// on it.
+//
+// Width follows the same rule as the other inputs (width-6 with a
+// 20-column floor), so the cycler row lines up vertically with the
+// text inputs above it.
+func (f *formModel) renderCycler() string {
+	name := ""
+	if f.layoutIdx < len(f.layoutNames) {
+		name = f.layoutNames[f.layoutIdx]
+	}
+	left, right := "‹", "›"
+	leftStyle, rightStyle := formCyclerArrowStyle, formCyclerArrowStyle
+	if f.focus == fieldTemplate {
+		leftStyle = formCyclerArrowFocusStyle
+		rightStyle = formCyclerArrowFocusStyle
+	}
+	return "  " + leftStyle.Render(left) + "  " + name + "  " + rightStyle.Render(right)
+}
+
 // view renders the form. Caller decides where to place it.
 func (f *formModel) view() string {
 	var b strings.Builder
@@ -205,7 +314,14 @@ func (f *formModel) view() string {
 		}
 		b.WriteString(label)
 		b.WriteString("\n")
-		b.WriteString(f.inputs[i].View())
+		// Layout field gets the cycler view when active — every other
+		// field, and the layout field in fallback mode, uses the
+		// underlying textinput.
+		if formField(i) == fieldTemplate && f.cyclerActive() {
+			b.WriteString(f.renderCycler())
+		} else {
+			b.WriteString(f.inputs[i].View())
+		}
 		b.WriteString("\n\n")
 	}
 
@@ -214,16 +330,44 @@ func (f *formModel) view() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(formHelpStyle.Render(
-		"tab/↓ next · shift-tab/↑ prev · enter on last field submits · ctrl-s submits · esc cancels"))
+	help := "tab/↓ next · shift-tab/↑ prev · enter on last field submits · ctrl-s submits · esc cancels"
+	if f.cyclerActive() && f.focus == fieldTemplate {
+		help = "←/→ cycle layouts · " + help
+	}
+	b.WriteString(formHelpStyle.Render(help))
+
+	// Layout preview, if a renderer was wired in. We render below the
+	// form (option B from the design discussion) rather than side-by-side
+	// because (a) it scales gracefully at narrow widths and (b) it keeps
+	// the form layout stable as the preview height changes — the user's
+	// focus and inputs don't shift around as they type a template name.
+	if f.preview != nil {
+		tpl := strings.TrimSpace(f.inputs[fieldTemplate].Value())
+		if tpl == "" {
+			tpl = "triple"
+		}
+		if rendered := f.preview(tpl); rendered != "" {
+			b.WriteString("\n\n")
+			b.WriteString(formLabelStyle.Render("  Preview of layout \"" + tpl + "\""))
+			b.WriteString("\n")
+			// Indent each line to align with the form's input column.
+			for _, line := range strings.Split(rendered, "\n") {
+				b.WriteString("  ")
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+		}
+	}
 	return b.String()
 }
 
 var (
-	formTitleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-	formLabelStyle      = lipgloss.NewStyle().Faint(true)
-	formLabelFocusStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-	formInfoStyle       = lipgloss.NewStyle().Faint(true).Italic(true)
-	formErrStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	formHelpStyle       = lipgloss.NewStyle().Faint(true)
+	formTitleStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
+	formLabelStyle            = lipgloss.NewStyle().Faint(true)
+	formLabelFocusStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
+	formInfoStyle             = lipgloss.NewStyle().Faint(true).Italic(true)
+	formErrStyle              = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	formHelpStyle             = lipgloss.NewStyle().Faint(true)
+	formCyclerArrowStyle      = lipgloss.NewStyle().Faint(true)
+	formCyclerArrowFocusStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
 )

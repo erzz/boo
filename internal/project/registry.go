@@ -47,7 +47,7 @@ var nameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 // Refusing them keeps `boo <name>` unambiguous.
 var reservedNames = map[string]bool{
 	"doctor": true, "new": true, "list": true, "delete": true,
-	"save": true, "fzf": true,
+	"save": true, "fzf": true, "layouts": true,
 	"help": true, "completion": true,
 }
 

@@ -146,6 +146,12 @@ and `boo doctor` results.
 - [ ] 59. `boo new t2 --dir ~/x --template dev` → multi-tab + split layout opens correctly.
 - [ ] 60. Hand-edit `~/.local/state/boo/projects/t1/layout.toml`, close window, `boo t1` → new layout takes effect.
 - [ ] 61. Corrupt the layout TOML, `boo t1` → clean validation error, no half-built window.
+- [ ] 61a. `boo layouts` → lists `default`, `dev`, `triple` (each with `[built-in]`, description, ASCII preview). Output is human-readable; previews show borders, cwd dot, and any annotations.
+- [ ] 61b. Drop a `~/.config/boo/layouts/scratch.toml` with a leading `# ...` comment, run `boo layouts` → `scratch` appears with `[user]`, the comment is the description, preview matches the TOML.
+- [ ] 61c. Override `default` by writing `~/.config/boo/layouts/default.toml`. `boo layouts` lists `default` ONCE, tagged `[user]`, with the override's description (not the built-in's). Remove the file when done.
+- [ ] 61d. Write `~/.config/boo/layouts/broken.toml` containing garbage. `boo layouts` still succeeds, lists `broken` with `[error]` and an inline reason; healthy layouts still appear. Remove the file.
+- [ ] 61e. `boo new` (no flags) → form opens with template field showing `default` and a preview block below. Tab to template field, type `dev` then `triple` → preview updates to match each. Type `nope` → preview disappears (no error inside the form).
+- [ ] 61f. `boo` (bare) → pick `+ New project`, same preview behaviour as 61e.
 
 ## Ghostty edge cases
 
