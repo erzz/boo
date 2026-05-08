@@ -14,7 +14,7 @@
 //
 // where <split> is recursively either:
 //
-//   leaf:     { "workingDirectory": "...", "command": "...", "env": {...},
+//   leaf:     { "workingDirectory": "...", "env": {...},
 //               "initialInput": "..." }
 //   interior: { "direction": "row"|"column", "children": [<split>, <split>] }
 //
@@ -80,8 +80,21 @@
       const cfg = app.newSurfaceConfiguration();
       if (!leaf) return cfg;
       if (leaf.workingDirectory) cfg.initialWorkingDirectory = leaf.workingDirectory;
-      if (leaf.command)          cfg.command = leaf.command;
-      if (leaf.initialInput)     cfg.initialInput = leaf.initialInput;
+      // NOTE: cfg.command and cfg.initialInput are intentionally never set.
+      //
+      //   - cfg.command launches a stripped-down bash
+      //     (`/bin/bash --noprofile --norc -c "exec -l <cmd>"`) that
+      //     ignores $SHELL, drops the user's PATH, and exits the surface
+      //     when the command exits.
+      //   - cfg.initialInput exists in the sdef but in practice nothing
+      //     gets typed into the running shell (timing? interaction with
+      //     wait-after-command? unclear, but empirically broken in
+      //     Ghostty 1.3.x as of this writing).
+      //
+      // Instead, we collect the desired keystrokes for every leaf during
+      // render() and replay them via `app.inputText(text, { to: term })`
+      // once the entire window is built and all shells have started.
+      // See pendingInputs / flushInputs below.
       if (leaf.env) {
         const envList = [];
         for (const k of Object.keys(leaf.env)) envList.push(`${k}=${leaf.env[k]}`);
@@ -99,9 +112,30 @@
       throw new Error("invalid split direction: " + String(d));
     }
 
-    // render walks the tree as described in the file header.
+    // pendingInputs collects { term, text } pairs to be replayed via
+    // app.inputText() after the entire window has been built. Capturing
+    // them during render() — rather than typing them inline — gives every
+    // shell a chance to spawn before we start pasting into it, which
+    // avoids races where the input lands before the prompt is ready.
+    const pendingInputs = [];
+
+    // recordInput stages a leaf's initialInput for later replay against
+    // the terminal it lives on.
+    function recordInput(leaf, term) {
+      if (leaf && leaf.initialInput && term) {
+        pendingInputs.push({ term: term, text: leaf.initialInput });
+      }
+    }
+
+    // render walks the tree as described in the file header. As it
+    // visits each leaf, it stages that leaf's initialInput against the
+    // terminal that materialises it, so flushInputs() can replay the
+    // keystrokes once everything is alive.
     function render(node, term) {
-      if (isLeaf(node)) return;
+      if (isLeaf(node)) {
+        recordInput(node, term);
+        return;
+      }
       if (!node.children || node.children.length !== 2) {
         throw new Error("interior node must have exactly 2 children, got " + (node.children ? node.children.length : 0));
       }
@@ -114,6 +148,18 @@
       const t2 = app.split(term, { direction: dir, withConfiguration: buildCfg(leftmostLeaf(right)) });
       render(left, term);
       render(right, t2);
+    }
+
+    // flushInputs replays every staged keystroke into its terminal. We
+    // do this after the whole window/all tabs are constructed so each
+    // shell has had a moment to print its prompt before we paste.
+    function flushInputs() {
+      for (let i = 0; i < pendingInputs.length; i++) {
+        const p = pendingInputs[i];
+        try {
+          app.inputText(p.text, { to: p.term });
+        } catch (_) { /* best-effort: ignore individual input failures */ }
+      }
     }
 
     let win;
@@ -153,6 +199,11 @@
         const seed = win.tabs[t].focusedTerminal();
         render(tab.root, seed);
       }
+
+      // 4. All terminals exist; replay each leaf's initialInput as a
+      //    paste-style input into its terminal. Done last so every
+      //    shell has had time to start before we type into it.
+      flushInputs();
 
       return JSON.stringify({ windowId: windowId });
     } catch (inner) {

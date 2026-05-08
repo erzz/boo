@@ -54,7 +54,7 @@ func TestResolveTemplate_AllBuiltins(t *testing.T) {
 // their tree shape pinned, not just a count.
 func TestBuiltinShapes(t *testing.T) {
 	type check struct {
-		tabs       int
+		tabs int
 		// rootKind is "leaf" for a single-pane tab, or "row"/"column"
 		// followed by a pipe-separated child shape: "row|leaf,leaf"
 		// means root is a row with two leaf children. We use a tiny

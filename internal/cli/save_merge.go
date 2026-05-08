@@ -206,7 +206,7 @@ func adoptInvisibles(dst *layout.Split, prev layout.Split) {
 //     the layout still validates).
 //   - N == 1 → the leaf itself as the root.
 //   - N >= 2 → a right-chain of row splits:
-//       row(leaves[0], row(leaves[1], row(leaves[2], ...)))
+//     row(leaves[0], row(leaves[1], row(leaves[2], ...)))
 //
 // Why right-chain rather than a balanced tree: the schema requires
 // exactly 2 children per interior node, so 3+ leaves must nest. A

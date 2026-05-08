@@ -49,6 +49,25 @@ type Theme struct {
 	FormHelp             lipgloss.Style
 	FormCyclerArrow      lipgloss.Style
 	FormCyclerArrowFocus lipgloss.Style
+
+	// Right pane (split view)
+	RightPaneBorder lipgloss.Style
+	RightPaneTitle  lipgloss.Style
+	RightPaneLabel  lipgloss.Style
+	RightPaneValue  lipgloss.Style
+	RightPaneFaint  lipgloss.Style
+
+	// Left pane (list) border. Mirrors RightPaneBorder so the split
+	// view reads as two equally-weighted panes rather than one boxed
+	// pane next to a bare list.
+	ListPaneBorder lipgloss.Style
+
+	// Status bar (bottom of the list screen). Renders the most recent
+	// action's outcome, e.g. "deleted alpha · ok" or "edit failed:
+	// name reserved".
+	StatusBar      lipgloss.Style // base / "ok" outcome
+	StatusBarError lipgloss.Style // failed-action outcome (red emphasis)
+	StatusBarFaint lipgloss.Style // idle / no-action-yet hint text
 }
 
 // defaultTheme is the only built-in theme today. The palette and weights
@@ -94,6 +113,24 @@ func defaultTheme() Theme {
 		FormHelp:             faint,
 		FormCyclerArrow:      faint,
 		FormCyclerArrowFocus: bold.Foreground(accent),
+
+		RightPaneBorder: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(stopped).
+			Padding(0, 1),
+		RightPaneTitle: bold.Foreground(accent),
+		RightPaneLabel: faint,
+		RightPaneValue: lipgloss.NewStyle(),
+		RightPaneFaint: faint,
+
+		ListPaneBorder: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(stopped).
+			Padding(0, 1),
+
+		StatusBar:      lipgloss.NewStyle().Foreground(ok),
+		StatusBarError: bold.Foreground(warn),
+		StatusBarFaint: faint,
 	}
 }
 

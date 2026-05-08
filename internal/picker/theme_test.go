@@ -54,6 +54,15 @@ func TestDefaultTheme_AllFieldsPopulated(t *testing.T) {
 		"FormHelp":               th.FormHelp,
 		"FormCyclerArrow":        th.FormCyclerArrow,
 		"FormCyclerArrowFocus":   th.FormCyclerArrowFocus,
+		"RightPaneBorder":        th.RightPaneBorder,
+		"RightPaneTitle":         th.RightPaneTitle,
+		"RightPaneLabel":         th.RightPaneLabel,
+		"RightPaneValue":         th.RightPaneValue,
+		"RightPaneFaint":         th.RightPaneFaint,
+		"ListPaneBorder":         th.ListPaneBorder,
+		"StatusBar":              th.StatusBar,
+		"StatusBarError":         th.StatusBarError,
+		"StatusBarFaint":         th.StatusBarFaint,
 	} {
 		if s == nil {
 			t.Errorf("defaultTheme() field %s is nil", name)

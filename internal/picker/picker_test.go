@@ -13,7 +13,7 @@ func newTestModel(items ...Item) *model {
 		listItems[i] = it
 	}
 	l := list.New(listItems, newDelegate(defaultTheme()), 80, 24)
-	return &model{list: l}
+	return &model{list: l, keys: defaultKeyMap()}
 }
 
 func keyMsg(s string) tea.KeyMsg {

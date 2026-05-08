@@ -79,9 +79,17 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 
 // OpenWindowParams is the input for OpenWindow. Kept intentionally small for
 // the Phase 0 proof-of-life; real layout support will land in Phase 1+.
+//
+// Note: there is intentionally no Command field. Ghostty's
+// surface-level `command:` property hard-codes a stripped-down
+// `bash --noprofile --norc -c "exec -l <cmd>"` launcher, which ignores
+// $SHELL, drops the user's PATH, and exits the surface when the
+// command exits. boo composes a command into InitialInput instead so
+// the user's normal default shell starts the way Ghostty would for a
+// vanilla new window — see internal/cli/switch.go::mergeCommandAndInput.
 type OpenWindowParams struct {
 	WorkingDirectory string            `json:"workingDirectory,omitempty"`
-	Command          string            `json:"command,omitempty"`
+	InitialInput     string            `json:"initialInput,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
 }
 
@@ -219,8 +227,13 @@ func (c *Client) FocusWindow(ctx context.Context, windowID string) error {
 // LayoutSplit is a node in a tab's split tree.
 //
 // A node is either a *leaf* (no children, may carry WorkingDirectory /
-// Command / InitialInput / Env) or an *interior* node (Direction is "row"
+// InitialInput / Env) or an *interior* node (Direction is "row"
 // or "column", Children is non-empty, all other fields are ignored).
+//
+// Note on commands: the layout YAML schema has both `command` and
+// `initial_input` fields, but on the wire we collapse them into a
+// single InitialInput string. See the long comment on
+// internal/cli/switch.go::splitToParams for the reasoning.
 //
 // Row means children are laid out left-to-right; column means top-to-bottom.
 // The JXA side walks this tree recursively: it materialises the first leaf
@@ -234,7 +247,6 @@ type LayoutSplit struct {
 
 	// Leaf fields.
 	WorkingDirectory string            `json:"workingDirectory,omitempty"`
-	Command          string            `json:"command,omitempty"`
 	InitialInput     string            `json:"initialInput,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
 }

@@ -120,6 +120,7 @@ func TestIntegration_OpenLayout_MultiTabWithSplits(t *testing.T) {
 		t.Fatalf("expected window %s to exist", res.WindowID)
 	}
 }
+
 // TestIntegration_OpenFocusCloseRoundTrip exercises the full lifecycle: open
 // a window, verify it exists, focus it, close it, verify it no longer exists.
 func TestIntegration_OpenFocusCloseRoundTrip(t *testing.T) {

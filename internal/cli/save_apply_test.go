@@ -19,8 +19,10 @@ import (
 // applySaveOutcome inspects Outcome and renders. We don't need a real
 // before/after — only the renderer cares about the structure, and we
 // assert against the renderer's output via substring matching.
-func silentDiff() SaveDiff      { return SaveDiff{Outcome: OutcomeSilent} }
-func structuralDiff() SaveDiff  { return SaveDiff{Outcome: OutcomeStructural, ChangedTabs: oneTabDiff()} }
+func silentDiff() SaveDiff { return SaveDiff{Outcome: OutcomeSilent} }
+func structuralDiff() SaveDiff {
+	return SaveDiff{Outcome: OutcomeStructural, ChangedTabs: oneTabDiff()}
+}
 func lossyDiff() SaveDiff {
 	return SaveDiff{
 		Outcome:     OutcomeLossy,

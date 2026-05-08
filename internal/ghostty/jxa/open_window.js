@@ -3,8 +3,11 @@
 //
 // Input shape (any field optional):
 //   { "workingDirectory": "/abs/path",
-//     "command": "nvim .",
+//     "initialInput": "nvim .\n",
 //     "env": { "FOO": "bar" } }
+//
+// Note: there is intentionally no "command" field. See open_layout.js
+// and internal/cli/switch.go::splitToParams for the reasoning.
 //
 // Reading stdin in JXA: ObjC bridge to NSFileHandle.
 (() => {
@@ -23,7 +26,7 @@
     // the returned record after creation.
     const cfg = app.newSurfaceConfiguration();
     if (params.workingDirectory) cfg.initialWorkingDirectory = params.workingDirectory;
-    if (params.command)          cfg.command = params.command;
+    // cfg.command is intentionally never set — see open_layout.js.
     if (params.initialInput)     cfg.initialInput = params.initialInput;
     if (params.env) {
       const envList = [];

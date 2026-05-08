@@ -24,7 +24,7 @@ import (
 type Project struct {
 	Name      string    `toml:"name"`
 	Dir       string    `toml:"dir"`
-	Layout    string    `toml:"layout"`             // template name used at create time, for display only
+	Layout    string    `toml:"layout"` // template name used at create time, for display only
 	CreatedAt time.Time `toml:"created_at,omitzero"`
 }
 

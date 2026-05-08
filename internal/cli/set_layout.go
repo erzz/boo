@@ -50,43 +50,48 @@ Run 'boo layouts' to see available templates.`,
 				return err
 			}
 			name, template := args[0], args[1]
-
-			// Resolve the template up front so a typo doesn't
-			// half-way through the registry write. ResolveTemplate
-			// returns a clear "not found" error.
-			resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, template)
-			if err != nil {
-				return err
-			}
-			l := resolved.Layout
-			if l.Name == "" {
-				l.Name = template
-			}
-
-			if err := a.Paths.WithLock(func() error {
-				reg, err := project.Load(a.Paths)
-				if err != nil {
-					return err
-				}
-				p, err := reg.Get(name)
-				if err != nil {
-					return err
-				}
-				if err := project.SaveLayout(a.Paths, name, l); err != nil {
-					return err
-				}
-				p.Layout = l.Name
-				if err := reg.Update(p); err != nil {
-					return err
-				}
-				return reg.Save(a.Paths)
-			}); err != nil {
+			if err := executeSetLayout(a, name, template); err != nil {
 				return err
 			}
 			_, _ = fmt.Fprintf(c.OutOrStdout(),
 				"Project %q is now using layout %q. Next 'boo %s' will apply it.\n",
-				name, l.Name, name)
+				name, template, name)
 			return nil
 		},
 	}
+}
+
+// executeSetLayout resolves the template, writes the per-project layout
+// snapshot, and updates the registry's Layout field — all under the
+// state lock. Used by both the `boo set-layout` command and the
+// bare-`boo` TUI dispatch (SetLayoutIntent), which is why it doesn't
+// print anything itself: callers tailor the success message to their
+// context (CLI prints, TUI re-enters the picker silently).
+func executeSetLayout(a *app, name, template string) error {
+	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, template)
+	if err != nil {
+		return err
+	}
+	l := resolved.Layout
+	if l.Name == "" {
+		l.Name = template
+	}
+	return a.Paths.WithLock(func() error {
+		reg, err := project.Load(a.Paths)
+		if err != nil {
+			return err
+		}
+		p, err := reg.Get(name)
+		if err != nil {
+			return err
+		}
+		if err := project.SaveLayout(a.Paths, name, l); err != nil {
+			return err
+		}
+		p.Layout = l.Name
+		if err := reg.Update(p); err != nil {
+			return err
+		}
+		return reg.Save(a.Paths)
+	})
 }

@@ -79,7 +79,7 @@ func TestDefaultsToIntent_PreservesFields(t *testing.T) {
 		Dir:                 "/some/path",
 		From:                "https://x",
 		Template:            "dev",
-		GitRemote:           "origin → ...",     // info-only; not in intent
+		GitRemote:           "origin → ...",    // info-only; not in intent
 		AlreadyRegisteredAs: "should-not-leak", // ditto
 	}
 	got := defaultsToIntent(d)

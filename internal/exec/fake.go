@@ -65,4 +65,3 @@ func (f *Fake) Snapshot() []Call {
 	copy(out, f.Calls)
 	return out
 }
-

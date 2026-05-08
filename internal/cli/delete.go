@@ -79,33 +79,43 @@ You will be asked to confirm; pass --force to skip the prompt.`,
 					}
 				}
 
-				if purge {
-					rt, err := project.LoadRuntime(a.Paths, p.Name)
-					if err == nil && rt.WindowID != "" {
-						if err := a.Ghostty.CloseWindow(c.Context(), rt.WindowID); err != nil {
-							_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: could not close window %s: %v\n", rt.WindowID, err)
-						}
-					}
-				}
-
-				if err := reg.Remove(p.Name); err != nil {
-					return err
-				}
-				if err := reg.Save(a.Paths); err != nil {
-					return err
-				}
-				if err := project.PurgeProjectDir(a.Paths, p.Name); err != nil {
-					// Registry is already updated; report but don't fail.
-					_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: removed from registry but could not purge state dir: %v\n", err)
-				}
-				_, _ = fmt.Fprintf(c.OutOrStdout(), "Deleted project %q (source dir %s left untouched)\n", p.Name, p.Dir)
-				return nil
+				return executeDelete(c.Context(), a, reg, p, purge, c.OutOrStdout(), c.ErrOrStderr())
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&purge, "purge", false, "also close any associated Ghostty window")
 	cmd.Flags().BoolVar(&force, "force", false, "skip the confirmation prompt")
 	return cmd
+}
+
+// executeDelete performs the side-effect half of `boo delete`: optional
+// window-close, registry removal, state-dir purge, and the success line.
+//
+// Extracted so the bare-`boo` TUI can reuse it after the in-modal
+// confirmation, without re-prompting the user. Callers MUST hold the
+// state lock (a.Paths.WithLock).
+func executeDelete(ctx context.Context, a *app, reg *project.Registry, p project.Project, purge bool, out io.Writer, errw io.Writer) error {
+	if purge {
+		rt, err := project.LoadRuntime(a.Paths, p.Name)
+		if err == nil && rt.WindowID != "" {
+			if err := a.Ghostty.CloseWindow(ctx, rt.WindowID); err != nil {
+				_, _ = fmt.Fprintf(errw, "warning: could not close window %s: %v\n", rt.WindowID, err)
+			}
+		}
+	}
+
+	if err := reg.Remove(p.Name); err != nil {
+		return err
+	}
+	if err := reg.Save(a.Paths); err != nil {
+		return err
+	}
+	if err := project.PurgeProjectDir(a.Paths, p.Name); err != nil {
+		// Registry is already updated; report but don't fail.
+		_, _ = fmt.Fprintf(errw, "warning: removed from registry but could not purge state dir: %v\n", err)
+	}
+	_, _ = fmt.Fprintf(out, "Deleted project %q (source dir %s left untouched)\n", p.Name, p.Dir)
+	return nil
 }
 
 // pickProjectForDelete shows the TUI picker in selection-only mode and
@@ -123,6 +133,7 @@ func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 	res, err := picker.Run(items, picker.Options{
 		Title:          "boo — delete project",
 		HideNewProject: true,
+		PreviewProject: projectPreviewer(ctx, a),
 		Theme:          a.Config.ThemeOr("default"),
 	})
 	if err != nil {
@@ -131,13 +142,17 @@ func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 	if res.Cancelled() {
 		return "", nil
 	}
-	si, ok := res.Intent.(picker.SwitchIntent)
-	if !ok {
-		// Should not happen — picker is in HideNewProject mode so only
-		// SwitchIntent and cancel are reachable.
+	// In selection-only mode, both enter (SwitchIntent) and d/D
+	// (DeleteIntent after confirm) are reasonable ways to indicate
+	// "this is the project to delete". Treat them identically.
+	switch v := res.Intent.(type) {
+	case picker.SwitchIntent:
+		return v.Name, nil
+	case picker.DeleteIntent:
+		return v.Name, nil
+	default:
 		return "", nil
 	}
-	return si.Name, nil
 }
 
 // confirmDelete asks the user to confirm a delete, spelling out exactly what

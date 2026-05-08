@@ -27,8 +27,14 @@ tabs:
                               # "." resolves to the project root.
                               # Relative paths resolve under the project dir;
                               # absolute paths are kept as-is.
-      command: nvim .         # Optional. Runs after the shell starts.
-      initial_input: ""       # Optional. Sent to the shell as keystrokes.
+      command: nvim .         # Optional. Typed into the default shell and
+                              # executed (followed by Enter). Your shell's
+                              # rc files run normally and PATH is intact.
+                              # When the command exits you're left at a
+                              # normal shell prompt — the pane does not close.
+      initial_input: ""       # Optional. Sent to the shell as keystrokes
+                              # WITHOUT a trailing Enter, so you can review
+                              # or edit before pressing return yourself.
       env:                    # Optional per-pane env vars.
         EDITOR: nvim
 
@@ -202,9 +208,25 @@ tabs:
           command: pytest --watch
 ```
 
-`initial_input` is sent to the shell as keystrokes after launch. Useful
-for activating venvs or sourcing per-shell setup that you don't want to
-put in your global rc.
+`initial_input` is sent to the shell as keystrokes after launch, with no
+trailing Enter — useful for activating venvs or sourcing per-shell setup
+that you don't want to put in your global rc, where you might want to
+review the command before running it.
+
+### `command` vs `initial_input`
+
+Both fields end up as keystrokes typed into your default shell after it
+starts (login shell, full PATH, rc files run normally). The only
+difference is the trailing newline:
+
+- `command: foo` → types `foo\n` (executes immediately).
+- `initial_input: "foo"` → types `foo` (waits for you to press Enter).
+- Both set → types `command\n` then `initial_input` (handy when the
+  command launches a REPL or interactive program you want to seed).
+
+When a `command` exits, the pane returns to a normal shell prompt — it
+does not close. If you want the surface to die with the command, exit
+the shell yourself or run `exec foo` instead.
 
 ### Per-pane env
 

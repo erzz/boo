@@ -51,7 +51,7 @@ func TestOpenWindow_PassesParamsAsStdinJSON(t *testing.T) {
 	c := New(fake)
 	res, err := c.OpenWindow(context.Background(), OpenWindowParams{
 		WorkingDirectory: "/tmp/projA",
-		Command:          "nvim .",
+		InitialInput:     "nvim .\n",
 		Env:              map[string]string{"FOO": "bar"},
 	})
 	if err != nil {
@@ -64,8 +64,8 @@ func TestOpenWindow_PassesParamsAsStdinJSON(t *testing.T) {
 	if !strings.Contains(got, `"workingDirectory":"/tmp/projA"`) {
 		t.Fatalf("stdin missing workingDirectory: %s", got)
 	}
-	if !strings.Contains(got, `"command":"nvim ."`) {
-		t.Fatalf("stdin missing command: %s", got)
+	if !strings.Contains(got, `"initialInput":"nvim .\n"`) {
+		t.Fatalf("stdin missing initialInput: %s", got)
 	}
 	if !strings.Contains(got, `"FOO":"bar"`) {
 		t.Fatalf("stdin missing env: %s", got)
@@ -84,7 +84,7 @@ func TestOpenLayout_PassesLayoutAsStdinJSON(t *testing.T) {
 			{
 				Name: "edit",
 				// Single-leaf tab: root is itself a leaf.
-				Root: LayoutSplit{WorkingDirectory: "/projA", Command: "nvim ."},
+				Root: LayoutSplit{WorkingDirectory: "/projA", InitialInput: "nvim .\n"},
 			},
 			{
 				Name: "run",
@@ -93,7 +93,7 @@ func TestOpenLayout_PassesLayoutAsStdinJSON(t *testing.T) {
 					Direction: "row",
 					Children: []LayoutSplit{
 						{WorkingDirectory: "/projA"},
-						{WorkingDirectory: "/projA", Command: "npm run dev"},
+						{WorkingDirectory: "/projA", InitialInput: "npm run dev\n"},
 					},
 				},
 			},
@@ -111,7 +111,7 @@ func TestOpenLayout_PassesLayoutAsStdinJSON(t *testing.T) {
 		`"name":"run"`,
 		`"direction":"row"`,
 		`"children":[`,
-		`"command":"npm run dev"`,
+		`"initialInput":"npm run dev\n"`,
 		`"workingDirectory":"/projA"`,
 	} {
 		if !strings.Contains(got, want) {

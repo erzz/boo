@@ -153,6 +153,74 @@ func TestRegistryUpdate_UnknownProjectIsErrNotFound(t *testing.T) {
 	}
 }
 
+// loadOrRegenerateLayout regenerates the snapshot from the registry's
+// template name when the on-disk file is missing. This handles old
+// pre-YAML installs whose stale .toml snapshots got cleaned up, and
+// anyone who blew away ~/.local/share/boo by accident.
+func TestLoadOrRegenerateLayout_RecreatesMissingSnapshot(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	registerProjectForTest(t, a, "proj", dir, "triple")
+
+	// Remove the snapshot the helper just wrote — simulate the
+	// migration scenario where layout.toml got deleted and no
+	// layout.yaml ever existed.
+	snapPath := a.Paths.ProjectLayoutFile("proj")
+	if err := os.Remove(snapPath); err != nil {
+		t.Fatalf("remove snapshot: %v", err)
+	}
+
+	reg, err := project.Load(a.Paths)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p, err := reg.Get("proj")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	l, err := loadOrRegenerateLayout(a, p)
+	if err != nil {
+		t.Fatalf("loadOrRegenerateLayout: %v", err)
+	}
+	if l.Name != "triple" {
+		t.Errorf("regenerated Layout.Name = %q, want %q", l.Name, "triple")
+	}
+	// Snapshot should be on disk again so subsequent calls go through
+	// the fast path.
+	if _, err := os.Stat(snapPath); err != nil {
+		t.Errorf("snapshot not rewritten: %v", err)
+	}
+}
+
+// Regeneration only kicks in for "file does not exist" — a present-but-
+// corrupt snapshot must surface as a hard error so users notice (vs.
+// silently overwriting their hand-edited layout).
+func TestLoadOrRegenerateLayout_CorruptSnapshotIsHardError(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	registerProjectForTest(t, a, "proj", dir, "triple")
+
+	// Overwrite the snapshot with garbage.
+	snapPath := a.Paths.ProjectLayoutFile("proj")
+	if err := os.WriteFile(snapPath, []byte("not: valid: yaml: at: all"), 0o644); err != nil {
+		t.Fatalf("write garbage: %v", err)
+	}
+
+	reg, err := project.Load(a.Paths)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p, err := reg.Get("proj")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	if _, err := loadOrRegenerateLayout(a, p); err == nil {
+		t.Fatal("expected error for corrupt snapshot, got nil")
+	}
+}
+
 // G7: show — verify the layout file path the command points the user
 // at actually exists for a registered project.
 func TestShow_LayoutFilePathExistsForRegisteredProject(t *testing.T) {

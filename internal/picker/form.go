@@ -62,6 +62,16 @@ func (f formField) label() string {
 //     points into layoutNames. ←/→ (and h/l) cycle when the field is
 //     focused. The textinput's value is kept in sync as a fallback so
 //     collect() can read it the same way in both modes.
+//
+// Edit mode (set via setEditMode) re-purposes the same widget for
+// editing an existing project. Differences:
+//   - Title says "Edit project" instead of "Register a new project".
+//   - The "Clone from URL" field is hidden — you can't change a
+//     registered project's clone source after the fact, and showing
+//     an empty unrelated field would be confusing. focusNext/focusPrev
+//     skip it; view() doesn't render it.
+//   - Submit produces an EditIntent (with the original name carried
+//     through editOldName) instead of a NewProjectIntent.
 type formModel struct {
 	inputs    []textinput.Model
 	focus     formField
@@ -86,6 +96,15 @@ type formModel struct {
 	// (which the CLI populates from user config), falling back to
 	// hardcodedFallbackLayout.
 	defaultLayout string
+
+	// editMode + editOldName turn this widget into an "edit existing
+	// project" form. editOldName is the project's original key — the
+	// EditIntent emitted on submit ships it as OldName so the CLI can
+	// distinguish a rename from a no-op. Empty editOldName with
+	// editMode true would be a programming error; we don't enforce it
+	// here because setEditMode is the only entry point.
+	editMode    bool
+	editOldName string
 }
 
 // hardcodedFallbackLayout is the layout name the form uses when no
@@ -190,11 +209,34 @@ func (f *formModel) cycleLayout(delta int) {
 	f.inputs[fieldTemplate].SetValue(f.layoutNames[f.layoutIdx])
 }
 
+// setEditMode flips the form into "edit existing project" mode. The
+// caller passes the project's current key — preserved so the emitted
+// EditIntent ships OldName even if the user changed Name in the form.
+//
+// Pre-populating the input values themselves is the caller's job (via
+// FormDefaults at construction time); this method only sets the flags
+// that change form behaviour. Calling with editMode=false reverts to
+// new-project semantics.
+func (f *formModel) setEditMode(editMode bool, oldName string) {
+	f.editMode = editMode
+	f.editOldName = oldName
+}
+
+// fieldHidden reports whether a field should be skipped during focus
+// navigation and rendering. Used to hide From in edit mode.
+func (f *formModel) fieldHidden(field formField) bool {
+	return f.editMode && field == fieldFrom
+}
+
 // Update returns (next model, cmd, submitted, intent, cancelled).
 //   - submitted=true: user pressed enter on the last field with valid content.
 //   - cancelled=true: user pressed esc.
 //   - both false: still editing.
-func (f *formModel) update(msg tea.Msg) (tea.Cmd, bool, *NewProjectIntent, bool) {
+//
+// `intent` is nil unless submitted=true. Its concrete type is
+// *NewProjectIntent for new-project mode and *EditIntent for edit mode.
+// Callers type-switch.
+func (f *formModel) update(msg tea.Msg) (tea.Cmd, bool, Intent, bool) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -210,7 +252,7 @@ func (f *formModel) update(msg tea.Msg) (tea.Cmd, bool, *NewProjectIntent, bool)
 			return f.tryCommit()
 		case "enter":
 			// On the last field, enter submits. Earlier fields advance focus.
-			if f.focus == numFormFields-1 {
+			if f.focus == f.lastVisibleField() {
 				return f.tryCommit()
 			}
 			f.focusNext()
@@ -246,15 +288,28 @@ func (f *formModel) update(msg tea.Msg) (tea.Cmd, bool, *NewProjectIntent, bool)
 	return cmd, false, nil, false
 }
 
-func (f *formModel) tryCommit() (tea.Cmd, bool, *NewProjectIntent, bool) {
+func (f *formModel) tryCommit() (tea.Cmd, bool, Intent, bool) {
+	if f.editMode {
+		intent, err := f.collectEdit()
+		if err != nil {
+			f.err = err.Error()
+			return nil, false, nil, false
+		}
+		// Return the value, not the pointer: the Intent interface is
+		// implemented by the value type (see isIntent receivers in
+		// picker.go), so a *EditIntent would not satisfy it.
+		return nil, true, *intent, false
+	}
 	intent, err := f.collect()
 	if err != nil {
 		f.err = err.Error()
 		return nil, false, nil, false
 	}
-	return nil, true, intent, false
+	return nil, true, *intent, false
 }
 
+// collect builds a NewProjectIntent from the current input values.
+// Used in new-project mode.
 func (f *formModel) collect() (*NewProjectIntent, error) {
 	name := strings.TrimSpace(f.inputs[fieldName].Value())
 	dir := strings.TrimSpace(f.inputs[fieldDir].Value())
@@ -280,16 +335,74 @@ func (f *formModel) collect() (*NewProjectIntent, error) {
 	}, nil
 }
 
+// collectEdit builds an EditIntent from the current input values.
+// Used in edit mode. From is intentionally ignored (it's hidden) — you
+// can't change a registered project's clone source.
+//
+// Validation is intentionally lighter than collect(): an empty Name is
+// rejected (you'd lose the project), but an unchanged Dir/Template is
+// fine — the CLI side is the one that decides whether anything actually
+// needs writing. Keeps the form unopinionated.
+func (f *formModel) collectEdit() (*EditIntent, error) {
+	name := strings.TrimSpace(f.inputs[fieldName].Value())
+	dir := strings.TrimSpace(f.inputs[fieldDir].Value())
+	tpl := strings.TrimSpace(f.inputs[fieldTemplate].Value())
+	if tpl == "" {
+		tpl = f.defaultLayout
+		if tpl == "" {
+			tpl = hardcodedFallbackLayout
+		}
+	}
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	if dir == "" {
+		return nil, fmt.Errorf("directory is required")
+	}
+	return &EditIntent{
+		OldName:     f.editOldName,
+		NewName:     name,
+		NewDir:      dir,
+		NewTemplate: tpl,
+	}, nil
+}
+
+// focusNext / focusPrev wrap around the visible fields, skipping any
+// that fieldHidden() reports — keeps tab/shift-tab/enter navigation
+// from "landing" on an invisible field in edit mode.
 func (f *formModel) focusNext() {
 	f.inputs[f.focus].Blur()
-	f.focus = (f.focus + 1) % numFormFields
+	for i := 0; i < int(numFormFields); i++ {
+		f.focus = (f.focus + 1) % numFormFields
+		if !f.fieldHidden(f.focus) {
+			break
+		}
+	}
 	f.inputs[f.focus].Focus()
 }
 
 func (f *formModel) focusPrev() {
 	f.inputs[f.focus].Blur()
-	f.focus = (f.focus - 1 + numFormFields) % numFormFields
+	for i := 0; i < int(numFormFields); i++ {
+		f.focus = (f.focus - 1 + numFormFields) % numFormFields
+		if !f.fieldHidden(f.focus) {
+			break
+		}
+	}
 	f.inputs[f.focus].Focus()
+}
+
+// lastVisibleField returns the highest field index that fieldHidden
+// reports as visible. Used so enter on the last *visible* field
+// commits, even when later fields are hidden in edit mode.
+func (f *formModel) lastVisibleField() formField {
+	for i := int(numFormFields) - 1; i >= 0; i-- {
+		ff := formField(i)
+		if !f.fieldHidden(ff) {
+			return ff
+		}
+	}
+	return fieldName // unreachable; nothing is hidden by default
 }
 
 // renderCycler draws the Layout field as `‹  <name>  ›` when the
@@ -317,15 +430,25 @@ func (f *formModel) renderCycler() string {
 // view renders the form. Caller decides where to place it.
 func (f *formModel) view() string {
 	var b strings.Builder
-	b.WriteString(f.theme.FormTitle.Render("Register a new project"))
+	title := "Register a new project"
+	if f.editMode {
+		title = "Edit project"
+		if f.editOldName != "" {
+			title += " — " + f.editOldName
+		}
+	}
+	b.WriteString(f.theme.FormTitle.Render(title))
 	b.WriteString("\n\n")
 
-	if f.gitRemote != "" {
+	if f.gitRemote != "" && !f.editMode {
 		b.WriteString(f.theme.FormInfo.Render("Detected git remote: " + f.gitRemote))
 		b.WriteString("\n\n")
 	}
 
 	for i := range f.inputs {
+		if f.fieldHidden(formField(i)) {
+			continue
+		}
 		label := formField(i).label()
 		if formField(i) == f.focus {
 			label = f.theme.FormLabelFocus.Render("› " + label)

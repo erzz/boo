@@ -240,7 +240,7 @@ still printed to stderr under --force so audit logs show what was lost.`,
 //   - Silent     → no output, no prompt, proceed.
 //   - Structural → render diff to stdout, prompt unless force.
 //   - Lossy      → render diff to STDERR (so --force still leaves a trace
-//                  for scripts/CI), prompt unless force.
+//     for scripts/CI), prompt unless force.
 //
 // Returning (false, nil) means the user declined; the caller is responsible
 // for printing "aborted" in whatever style fits its surrounding output.
@@ -283,8 +283,8 @@ func applySaveOutcome(diff SaveDiff, force bool, in io.Reader, out, errOut io.Wr
 // returns nil error AND a window was focused:
 //   - project        → focused window belongs to this registered project
 //   - unregisteredCwd → focused window exists but no registered project
-//                       owns it; cwd is the focused terminal's working dir
-//                       (best-effort; may be "" if Describe failed)
+//     owns it; cwd is the focused terminal's working dir
+//     (best-effort; may be "" if Describe failed)
 //
 // When no Ghostty window is focused, the function returns a clean error
 // rather than an empty match — there's nothing actionable to do in that
