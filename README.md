@@ -8,7 +8,78 @@
 
 A project launcher for [Ghostty](https://ghostty.org).
 
-Switching between projects in a terminal usually means a minute of yak-shaving: open a new window, `cd` to the right place, re-open your editor, re-launch the dev server, re-open lazygit in a split. boo collapses all of that into one command — `boo projA` — and remembers each project's layout (windows, tabs, splits, working directories, startup commands) so it's identical every time.
+Switching between projects in a terminal usually means several minutes of yak-shaving: open a new
+window, `cd` to the right place, re-open your editor, re-launch the dev server, re-open lazygit in a
+split. boo collapses all of that into one command — `boo projA` — and remembers each project's
+layout (windows, tabs, splits, working directories, startup commands) so it's identical every time.
+
+So yes, the cheesy branding here is all about spawning lots of baby ghost(tty)s!
+
+## Features
+
+`boo` is both a TUI and a CLI that you can use to register, edit or launch your ghostty sessions
+exactly how you like them!
+
+For example, I like to launch my vibe-coding project with a large opencode pane on the left with 2
+panes stacked on each other on the right for lazygit and nvim.
+
+`boo myvibeproject` launches a new ghossty window looking like this:
+
+<p align="center">
+  <img src="docs/screenshots/vibe.png" alt="vibe-coding layout: opencode left, lazygit and nvim stacked on the right" width="800">
+</p>
+
+Meanwhile, in another project for serious work, I like two tabs. Tab 1 has 2 panes (neovim and
+tests) and the second tab has four panes for poking around filesystem, btop and some scratch shells.
+
+`boo seriousproject` launches a ghostty window looking like:
+
+<p align="center">
+  <img src="docs/screenshots/tab1.png" alt="serious project tab 1: nvim and tests" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/tab2.png" alt="serious project tab 2: filesystem, btop, scratch shells" width="800">
+</p>
+
+It has several builtin [layouts](./docs/layouts.md) but you can add your own with a simple yaml. You can switch layouts,
+add custom commands for each pane or even create a project from a git repo.
+
+## Why not tmux?
+
+Honestly, I have used tmux for several years and get frustrated occasionally with keybinds, plugins,
+poor rendering and losing the native feel and performance of Ghostty for features that I never use.
+I hardly ever use persistence or true multiplexing - I just wanna quickly get my terminal
+environment launched for any project with right tools, directories, env vars and layout - quickly!
+
+If you are like me and work across dozens and dozens of projects and flip around them all the time,
+this is for you! If you need Linux support, persistence or other tmux features, it's not!
+
+## I hope this is temporary!
+
+I can't wait for multiplexing and session management to be built into Ghostty! I will archive this
+project one day!
+
+## The Tour
+
+### TUI
+
+`boo` provides a TUI for registering, editing or launching projects. Running `boo` with no arguments
+opens the TUI: bordered project list on the left, context preview on the right (when the terminal is
+wide enough), status bar & keybindings at the bottom.
+
+<p align="center">
+  <img src="docs/screenshots/main.png" alt="boo TUI project picker" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/new.png" alt="boo new-project form" width="800">
+</p>
+
+### CLI
+
+There is also a CLI allowing you to script and manage everything the TUI does with fine-grained
+control and extra nerd points!
 
 ```
 boo                  # interactive picker over all known projects
@@ -31,31 +102,32 @@ Pre-alpha. Under active development. macOS only.
 
 ## How it works
 
-boo drives Ghostty via its native AppleScript / JXA API. There is no tmux, no terminal multiplexer, no leaky abstraction — splits are Ghostty splits, scrollback is Ghostty scrollback, everything Ghostty does just works. Windows you opened with boo stay open across switches, so the processes inside them keep running.
+boo drives Ghostty via its native AppleScript / JXA API. There is no tmux, no terminal multiplexer,
+no leaky abstraction — splits are Ghostty splits, scrollback is Ghostty scrollback, everything
+Ghostty does just works. Windows you opened with boo stay open across switches, so the processes
+inside them keep running.
 
 ## Interactive picker
 
-Running `boo` with no arguments opens a Bubble Tea TUI: bordered project list on the left, context preview on the right (when the terminal is wide enough), status bar at the bottom.
+| key                  | action                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------ |
+| `↑` / `↓`, `k` / `j` | move selection                                                                             |
+| `/`                  | filter by name or path                                                                     |
+| `enter`              | switch to the selected project                                                             |
+| `n`, `+`             | register a new project                                                                     |
+| `e`                  | edit the selected project (rename, change directory, change layout template)               |
+| `l`                  | cycle the layout template for the selected project (`←` / `→` to choose, `enter` to apply) |
+| `o`                  | open the selected project's layout YAML in `$EDITOR` (TUI suspends, resumes on exit)       |
+| `d`                  | delete the selected project (asks to confirm)                                              |
+| `D`                  | delete **and** close the project's Ghostty window                                          |
+| `?`                  | toggle full help                                                                           |
+| `q`, `esc`, `ctrl-c` | quit                                                                                       |
 
-Keybindings on the project list:
+The right pane shows the selected project's directory, status (running / stopped / dir-missing),
+last-launched time, and an ASCII preview of its current layout.
 
-| key | action |
-|-----|--------|
-| `↑` / `↓`, `k` / `j` | move selection |
-| `/` | filter by name or path |
-| `enter` | switch to the selected project |
-| `n`, `+` | register a new project |
-| `e` | edit the selected project (rename, change directory, change layout template) |
-| `l` | cycle the layout template for the selected project (`←` / `→` to choose, `enter` to apply) |
-| `o` | open the selected project's layout YAML in `$EDITOR` (TUI suspends, resumes on exit) |
-| `d` | delete the selected project (asks to confirm) |
-| `D` | delete **and** close the project's Ghostty window |
-| `?` | toggle full help |
-| `q`, `esc`, `ctrl-c` | quit |
-
-The right pane shows the selected project's directory, status (running / stopped / dir-missing), last-launched time, and an ASCII preview of its current layout. Below ~90 cols or ~24 rows the picker collapses to single-pane mode and uses the full width for the list — visible status pills and the status bar are still rendered.
-
-The status bar reflects the most recent action's outcome: `✓ deleted alpha`, `✖ rename failed: …`, etc. Idle state shows a faint `press ? for help`.
+The status bar reflects the most recent action's outcome: `✓ deleted alpha`, `✖ rename failed: …`,
+etc.
 
 ## New-project form
 
@@ -65,11 +137,14 @@ The status bar reflects the most recent action's outcome: `✓ deleted alpha`, `
 - **Directory** — existing path, or a `git@…` / `https://…` URL to clone
 - **Layout** — cycler over the available templates (`←` / `→` to choose). Defaults to `triple`.
 
-Submitting the form registers the project, captures or generates its layout, and immediately opens the Ghostty window. Cancel with `esc`.
+Submitting the form registers the project, captures or generates its layout, and immediately opens
+the Ghostty window. Cancel with `esc`.
 
 ## Layouts
 
-Layouts are YAML — one per project, plus shared templates. See [`docs/layouts.md`](./docs/layouts.md) for the full reference, the bundled built-ins (`single`, `dual`, `triple`, …), and copy-paste examples (Node, Go, Rust, Python).
+Layouts are YAML — one per project, plus shared templates. See
+[`docs/layouts.md`](./docs/layouts.md) for the full reference, the bundled built-ins (`triple`,
+`1x2x2`, `2x1x1`, …), and copy-paste examples (Node, Go, Rust, Python).
 
 A layout is a tree of windows → tabs → splits. Each leaf can specify:
 
@@ -82,11 +157,9 @@ A layout is a tree of windows → tabs → splits. Each leaf can specify:
 
 ## Configuration
 
-Global config lives at `~/.config/boo/config.yaml`. See [`docs/config.md`](./docs/config.md) for the schema. `boo config` prints the effective config plus where each value came from; `boo config edit` opens it in `$EDITOR`.
-
-## Brand
-
-The papa-and-baby-boos mark, colour palette, and ASCII variants live in [`docs/brand/`](./docs/brand). See [`docs/brand/BRAND.md`](./docs/brand/BRAND.md) for the design intent.
+Global config lives at `~/.config/boo/config.yaml`. See [`docs/config.md`](./docs/config.md) for the
+schema. `boo config` prints the effective config plus where each value came from; `boo config edit`
+opens it in `$EDITOR`.
 
 ## Requirements
 
@@ -94,7 +167,9 @@ The papa-and-baby-boos mark, colour palette, and ASCII variants live in [`docs/b
 - [Ghostty](https://ghostty.org) 1.3+
 - Go 1.24+ (only to build from source)
 
-The first time boo controls Ghostty, macOS will prompt for **Automation** permission. `boo doctor` detects and surfaces the common setup issues (missing Ghostty, version mismatch, missing automation permission, missing `$EDITOR`).
+The first time boo controls Ghostty, macOS will prompt for **Automation** permission. `boo doctor`
+detects and surfaces the common setup issues (missing Ghostty, version mismatch, missing automation
+permission, missing `$EDITOR`).
 
 ## Build
 
@@ -103,7 +178,8 @@ make build
 ./bin/boo doctor
 ```
 
-See [`docs/testing.md`](./docs/testing.md) for what CI runs and the manual smoke tests run before a release.
+See [`docs/testing.md`](./docs/testing.md) for what CI runs and the manual smoke tests run before a
+release.
 
 ## License
 
