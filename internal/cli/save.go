@@ -25,7 +25,12 @@ func isLayoutParseError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "layout:")
 }
 
-func newSaveCmd() *cobra.Command {
+func newSaveCmd() *cobra.Command { return newSaveCmdWithApp(nil) }
+
+// newSaveCmdWithApp is like newSaveCmd but uses appIn instead of calling
+// newApp() inside RunE.  Pass nil for production behaviour.
+// Used by tests to inject a fake *app.
+func newSaveCmdWithApp(appIn *app) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "save [name]",
@@ -65,9 +70,13 @@ Use --force to skip the confirmation in either case. The lossy diff is
 still printed to stderr under --force so audit logs show what was lost.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			a, err := newApp()
-			if err != nil {
-				return err
+			a := appIn
+			if a == nil {
+				var err error
+				a, err = newApp()
+				if err != nil {
+					return err
+				}
 			}
 			reg, err := project.Load(a.Paths)
 			if err != nil {

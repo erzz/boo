@@ -17,7 +17,13 @@ import (
 	"github.com/erzz/boo/internal/theme"
 )
 
-func newDoctorCmd() *cobra.Command {
+func newDoctorCmd() *cobra.Command { return newDoctorCmdWithRunner(nil) }
+
+// newDoctorCmdWithRunner is like newDoctorCmd but uses runnerIn instead of
+// booexec.NewReal() inside RunE.  Pass nil for production behaviour.
+// Used by tests to inject a fake runner so doctor's cobra path is exercised
+// without needing a live Ghostty or real osascript.
+func newDoctorCmdWithRunner(runnerIn booexec.Runner) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check that your environment is set up to run boo",
@@ -26,7 +32,10 @@ func newDoctorCmd() *cobra.Command {
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			runner := booexec.NewReal()
+			runner := runnerIn
+			if runner == nil {
+				runner = booexec.NewReal()
+			}
 			client := ghostty.New(runner)
 			// Doctor must run even if config is broken — it's the
 			// command users will reach for to diagnose that exact

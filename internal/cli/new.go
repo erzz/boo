@@ -18,7 +18,13 @@ import (
 	"github.com/erzz/boo/internal/project"
 )
 
-func newNewCmd() *cobra.Command {
+func newNewCmd() *cobra.Command { return newNewCmdWithApp(nil) }
+
+// newNewCmdWithApp is like newNewCmd but uses appIn instead of calling
+// newApp() inside RunE.  Pass nil to get normal production behaviour.
+// Used by tests to inject a fake *app so cobra flag-parsing is exercised
+// without touching the real filesystem, git, or Ghostty.
+func newNewCmdWithApp(appIn *app) *cobra.Command {
 	var (
 		fromURL    string
 		intoDir    string
@@ -49,9 +55,13 @@ back to the current directory (and any detected git remote), so
 flags act as form pre-population and the user can edit before submitting.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			a, err := newApp()
-			if err != nil {
-				return err
+			a := appIn
+			if a == nil {
+				var err error
+				a, err = newApp()
+				if err != nil {
+					return err
+				}
 			}
 
 			// Build form defaults from flags + cwd inspection. Flag values
