@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"sort"
 
 	"github.com/spf13/cobra"
@@ -105,24 +104,13 @@ $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
 			if err := os.MkdirAll(p.ConfigDir, 0o755); err != nil {
 				return fmt.Errorf("create config dir %s: %w", p.ConfigDir, err)
 			}
-			editor := os.Getenv("EDITOR")
-			if editor == "" {
-				editor = os.Getenv("VISUAL")
-			}
-			if editor == "" {
-				return fmt.Errorf("set $EDITOR (or $VISUAL) to use 'boo config edit'")
-			}
 			path := p.ConfigFile
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				if err := os.WriteFile(path, nil, 0o644); err != nil {
 					return fmt.Errorf("create %s: %w", path, err)
 				}
 			}
-			ed := exec.Command(editor, path)
-			ed.Stdin = os.Stdin
-			ed.Stdout = os.Stdout
-			ed.Stderr = os.Stderr
-			return ed.Run()
+			return openInEditor("", path)
 		},
 	}
 }

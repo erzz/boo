@@ -21,7 +21,7 @@ func openLayoutModel(t *testing.T, items ...Item) (*model, *[]string) {
 		// so we can drive the post-editor refresh path in one update.
 		return func() tea.Msg { return NewEditorFinishedMsg(nil) }
 	}
-	m.refreshItems = func() []Item { return items }
+	m.refreshItems = func() ([]Item, error) { return items, nil }
 	return m, &calls
 }
 
@@ -73,7 +73,7 @@ func TestList_OPressOnNewProjectRowIsNoop(t *testing.T) {
 func TestList_OPressNilCmdIsNoop(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/a"})
 	m.onOpenLayout = func(_ string) tea.Cmd { return nil }
-	m.refreshItems = func() []Item { return nil }
+	m.refreshItems = func() ([]Item, error) { return nil, nil }
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
 	mm := updated.(*model)
@@ -92,9 +92,9 @@ func TestList_OPressNilCmdIsNoop(t *testing.T) {
 func TestEditorFinishedMsg_SuccessRefreshes(t *testing.T) {
 	refreshCalls := 0
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/a"})
-	m.refreshItems = func() []Item {
+	m.refreshItems = func() ([]Item, error) {
 		refreshCalls++
-		return []Item{{Key: "alpha", Title: "alpha", Description: "/tmp/a"}}
+		return []Item{{Key: "alpha", Title: "alpha", Description: "/tmp/a"}}, nil
 	}
 
 	updated, _ := m.Update(NewEditorFinishedMsg(nil))
@@ -116,7 +116,7 @@ func TestEditorFinishedMsg_SuccessRefreshes(t *testing.T) {
 //   - editor process failed/crashed (tea.ExecProcess passes the err through)
 func TestEditorFinishedMsg_ErrorShowsErrorScreen(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/a"})
-	m.refreshItems = func() []Item { return nil }
+	m.refreshItems = func() ([]Item, error) { return nil, nil }
 
 	updated, _ := m.Update(NewEditorFinishedMsg(errors.New("vim segfaulted")))
 	mm := updated.(*model)

@@ -18,7 +18,7 @@ func setLayoutModelWithNames(t *testing.T, names []string, items ...Item) (*mode
 		calls = append(calls, name+"="+template)
 		return nil
 	}
-	m.refreshItems = func() []Item { return items }
+	m.refreshItems = func() ([]Item, error) { return items, nil }
 	return m, &calls
 }
 

@@ -1,6 +1,8 @@
 package picker
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -158,5 +160,156 @@ func TestInitialScreen_BareBooSkipsInterstitial(t *testing.T) {
 					tt.formOnly, tt.alreadyRegisteredAs, got, tt.want)
 			}
 		})
+	}
+}
+
+// Fix 1: RefreshItems error must leave items intact; empty slice must clear.
+
+// TestRefreshList_ErrorPreservesItems verifies that when the RefreshItems
+// callback returns an error the existing list contents are kept unchanged.
+// This is the critical invariant: a transient registry read failure must
+// not wipe out the items the user is currently looking at.
+func TestRefreshList_ErrorPreservesItems(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha"}
+	beta := Item{Key: "beta", Title: "beta"}
+	m := newTestModel(alpha, beta)
+
+	callCount := 0
+	m.refreshItems = func() ([]Item, error) {
+		callCount++
+		return nil, errors.New("registry unavailable")
+	}
+
+	m.refreshList()
+
+	if callCount != 1 {
+		t.Fatalf("refreshItems called %d times, want 1", callCount)
+	}
+	// Both original items should still be visible.
+	got := m.list.Items()
+	if len(got) != 2 {
+		t.Fatalf("list has %d items after error refresh, want 2 (items must be preserved)", len(got))
+	}
+	if it, ok := got[0].(Item); !ok || it.Key != "alpha" {
+		t.Errorf("item[0] = %v, want alpha", got[0])
+	}
+	if it, ok := got[1].(Item); !ok || it.Key != "beta" {
+		t.Errorf("item[1] = %v, want beta", got[1])
+	}
+}
+
+// TestRefreshList_EmptySliceShowsEmptyState verifies that a nil error
+// with an empty (or nil) item slice updates the list to empty. This is
+// distinct from an error: it is the correct outcome when the last project
+// has been deleted.
+func TestRefreshList_EmptySliceShowsEmptyState(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha"}
+	m := newTestModel(alpha)
+	m.hideNewProject = true // suppress the synthetic "+ New project" entry
+
+	m.refreshItems = func() ([]Item, error) {
+		return []Item{}, nil // success, but nothing left
+	}
+
+	m.refreshList()
+
+	got := m.list.Items()
+	if len(got) != 0 {
+		t.Fatalf("list has %d items after empty-slice refresh, want 0", len(got))
+	}
+}
+
+// TestRefreshList_NilSliceSuccessShowsEmptyState verifies that a nil
+// slice returned alongside a nil error also clears the list (nil == empty
+// in the "no projects remaining" sense).
+func TestRefreshList_NilSliceSuccessShowsEmptyState(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha"}
+	m := newTestModel(alpha)
+	m.hideNewProject = true
+
+	m.refreshItems = func() ([]Item, error) {
+		return nil, nil // success, intentionally empty
+	}
+
+	m.refreshList()
+
+	got := m.list.Items()
+	if len(got) != 0 {
+		t.Fatalf("list has %d items after nil-slice-success refresh, want 0", len(got))
+	}
+}
+
+// Fix 2: delete with purge + window-close failure must surface the warning.
+
+// TestRunIntent_DeletePurge_WindowCloseWarning verifies that when the
+// onDelete callback returns a non-empty warning string (window close
+// failed) the status bar reflects it rather than claiming success.
+func TestRunIntent_DeletePurge_WindowCloseWarning(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha"}
+	m := newTestModel(alpha)
+	m.onDelete = func(name string, purge bool) (string, error) {
+		return "could not close window w1: connection refused", nil
+	}
+	m.refreshItems = func() ([]Item, error) { return []Item{}, nil }
+
+	updated, _ := m.runIntent(DeleteIntent{Name: "alpha", Purge: true})
+	mm := updated.(*model)
+
+	if mm.status.isErr {
+		t.Fatal("status should not be an error (deletion succeeded)")
+	}
+	if mm.status.text == "" {
+		t.Fatal("status text should be non-empty")
+	}
+	const want = "window close failed"
+	if !strings.Contains(mm.status.text, want) {
+		t.Errorf("status = %q, want it to contain %q", mm.status.text, want)
+	}
+}
+
+// TestRunIntent_DeletePurge_NoWarning verifies the happy path: when
+// purge succeeds without a warning the status says "deleted … and closed window".
+func TestRunIntent_DeletePurge_NoWarning(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha"}
+	m := newTestModel(alpha)
+	m.onDelete = func(name string, purge bool) (string, error) {
+		return "", nil // success, no warning
+	}
+	m.refreshItems = func() ([]Item, error) { return []Item{}, nil }
+
+	updated, _ := m.runIntent(DeleteIntent{Name: "alpha", Purge: true})
+	mm := updated.(*model)
+
+	if mm.status.isErr {
+		t.Fatal("status should not be an error")
+	}
+	const want = "and closed window"
+	if !strings.Contains(mm.status.text, want) {
+		t.Errorf("status = %q, want it to contain %q", mm.status.text, want)
+	}
+}
+
+// TestRunIntent_Delete_ErrorPreservesItems verifies that a failed delete
+// shows an error screen and does NOT call refresh (so items are preserved).
+func TestRunIntent_Delete_ErrorPreservesItems(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha"}
+	m := newTestModel(alpha)
+	refreshCalled := false
+	m.onDelete = func(name string, purge bool) (string, error) {
+		return "", errors.New("registry locked")
+	}
+	m.refreshItems = func() ([]Item, error) {
+		refreshCalled = true
+		return []Item{}, nil
+	}
+
+	updated, _ := m.runIntent(DeleteIntent{Name: "alpha", Purge: false})
+	mm := updated.(*model)
+
+	if mm.screen != screenError {
+		t.Errorf("screen = %v, want screenError", mm.screen)
+	}
+	if refreshCalled {
+		t.Error("refreshItems must not be called when onDelete returns an error")
 	}
 }

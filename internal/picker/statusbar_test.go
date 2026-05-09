@@ -53,8 +53,8 @@ func TestStatusBar_PurgeSuccessReflectsWindowClose(t *testing.T) {
 // bottom (rather than vanishing).
 func TestStatusBar_FailureSetsErrorStatus(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/x/alpha"})
-	m.onDelete = func(_ string, _ bool) error { return errFake }
-	m.refreshItems = func() []Item { return nil }
+	m.onDelete = func(_ string, _ bool) (string, error) { return "", errFake }
+	m.refreshItems = func() ([]Item, error) { return nil, nil }
 
 	m = pressKey(t, m, "d")
 	m = pressKey(t, m, "y")
@@ -82,8 +82,8 @@ func TestStatusBar_FailureSetsErrorStatus(t *testing.T) {
 // editorFinishedMsg sets the status bar to "layout file saved".
 func TestStatusBar_EditorSuccessSetsStatus(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/x/alpha"})
-	m.refreshItems = func() []Item {
-		return []Item{{Key: "alpha", Title: "alpha", Description: "/x/alpha"}}
+	m.refreshItems = func() ([]Item, error) {
+		return []Item{{Key: "alpha", Title: "alpha", Description: "/x/alpha"}}, nil
 	}
 	updated, _ := m.Update(NewEditorFinishedMsg(nil))
 	mm := updated.(*model)

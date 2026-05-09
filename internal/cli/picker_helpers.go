@@ -84,8 +84,9 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	// to a refreshed list rather than dropping them back to the shell.
 	// Each callback re-Loads the registry under the state lock to
 	// avoid racing with other shells.
-	onDelete := func(name string, purge bool) error {
-		return a.Paths.WithLock(func() error {
+	onDelete := func(name string, purge bool) (string, error) {
+		var warn string
+		err := a.Paths.WithLock(func() error {
 			freshReg, err := project.Load(a.Paths)
 			if err != nil {
 				return err
@@ -98,8 +99,12 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 			// line would just flash and disappear. Send its output to
 			// io.Discard; the user sees the result via the refreshed
 			// list (project gone) instead.
-			return executeDelete(ctx, a, freshReg, p, purge, io.Discard, io.Discard)
+			var innerWarn string
+			innerWarn, err = executeDelete(ctx, a, freshReg, p, purge, io.Discard, io.Discard)
+			warn = innerWarn
+			return err
 		})
+		return warn, err
 	}
 	onSetLayout := func(name, template string) error {
 		return executeSetLayout(a, name, template)
@@ -112,16 +117,7 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		// is the fallback. If neither is set we surface the issue
 		// inside the picker (via editorFinishedMsg → screenError)
 		// rather than silently doing nothing.
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = os.Getenv("VISUAL")
-		}
-		if editor == "" {
-			return func() tea.Msg {
-				return picker.NewEditorFinishedMsg(
-					errors.New("set $EDITOR (or $VISUAL) to edit layout files from the picker"))
-			}
-		}
+		//
 		// Confirm the project is still registered + the layout file
 		// exists before suspending the alt-screen. A "no such file"
 		// after the editor has stolen the terminal would be much
@@ -140,22 +136,25 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 					fmt.Errorf("layout file for project %q not found at %s: %w", name, path, err))
 			}
 		}
-		ed := exec.Command(editor, path)
+		ed, err := buildEditorCmd("", path)
+		if err != nil {
+			return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
+		}
 		// tea.ExecProcess wires Stdin/Stdout/Stderr to the controlling
 		// terminal automatically and restores the alt-screen on exit.
 		return tea.ExecProcess(ed, func(err error) tea.Msg {
 			return picker.NewEditorFinishedMsg(err)
 		})
 	}
-	refresh := func() []picker.Item {
+	refresh := func() ([]picker.Item, error) {
 		freshReg, err := project.Load(a.Paths)
 		if err != nil {
-			// Refresh failures are non-fatal — leave the existing
-			// items alone. The user can still navigate; next action
-			// will re-Load the registry under the lock anyway.
-			return nil
+			// Refresh failures are non-fatal — the picker will leave
+			// the existing items alone. The user can still navigate;
+			// the next action will re-load the registry under the lock.
+			return nil, err
 		}
-		return buildPickerItems(ctx, a, freshReg.Projects)
+		return buildPickerItems(ctx, a, freshReg.Projects), nil
 	}
 
 	res, err := picker.Run(items, picker.Options{

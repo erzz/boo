@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/spf13/cobra"
 
@@ -49,13 +48,6 @@ $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
 				return err
 			}
 
-			editor := os.Getenv("EDITOR")
-			if editor == "" {
-				editor = os.Getenv("VISUAL")
-			}
-			if editor == "" {
-				return fmt.Errorf("set $EDITOR (or $VISUAL) to use 'boo edit'")
-			}
 			path := a.Paths.ProjectLayoutFile(name)
 			if _, err := os.Stat(path); err != nil {
 				// The layout file should exist for any registered
@@ -64,11 +56,7 @@ $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
 				// the path so the user can investigate.
 				return fmt.Errorf("layout file for project %q not found at %s: %w", name, path, err)
 			}
-			ed := exec.Command(editor, path)
-			ed.Stdin = os.Stdin
-			ed.Stdout = os.Stdout
-			ed.Stderr = os.Stderr
-			return ed.Run()
+			return openInEditor("", path)
 		},
 	}
 }

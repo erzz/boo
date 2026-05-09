@@ -24,7 +24,7 @@ func editModel(t *testing.T, items ...Item) (*model, *[]string) {
 		calls = append(calls, oldName+"→"+newName+":"+newDir+":"+newTemplate)
 		return nil
 	}
-	m.refreshItems = func() []Item { return items }
+	m.refreshItems = func() ([]Item, error) { return items, nil }
 	return m, &calls
 }
 
@@ -181,9 +181,9 @@ func TestEditIntent_DispatchesOnEditAndRefreshes(t *testing.T) {
 	)
 	// Wrap refreshItems so we can count invocations.
 	origItems := []Item{{Key: "beta", Title: "beta", Description: "/tmp/b"}}
-	m.refreshItems = func() []Item {
+	m.refreshItems = func() ([]Item, error) {
 		refreshCalls++
-		return origItems
+		return origItems, nil
 	}
 
 	m.runIntent(EditIntent{
@@ -212,7 +212,7 @@ func TestEditIntent_OnEditError_ShowsErrorScreen(t *testing.T) {
 	m.onEdit = func(_, _, _, _ string) error {
 		return errors.New("disk on fire")
 	}
-	m.refreshItems = func() []Item { return nil }
+	m.refreshItems = func() ([]Item, error) { return nil, nil }
 
 	m.runIntent(EditIntent{OldName: "alpha", NewName: "beta", NewDir: "/tmp/b"})
 	if m.screen != screenError {

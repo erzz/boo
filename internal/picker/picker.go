@@ -10,6 +10,7 @@ package picker
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -158,12 +159,12 @@ type Options struct {
 	// files (typically ~/.config/boo/themes). Empty means "built-ins
 	// only" — useful in tests and when boo runs on a clean machine.
 	ThemesDir string
-	// ConfigPath is the path to the user's config.yaml. When set, the
-	// picker's `T` keybind cycles through available themes and
-	// persists the choice by rewriting this file. Empty disables the
-	// keybind (the picker still respects Theme for the session, but
-	// can't save changes — used in tests and any future read-only
-	// caller).
+	// ConfigPath is the path to the user's config.yaml. When set,
+	// the picker's `T` keybind writes the newly-selected theme back
+	// to disk (lossless: comments and other keys are preserved) and
+	// includes the key in the help footer. Empty suppresses the key
+	// from help and makes theme cycling session-only (useful in tests
+	// and lightweight callers that don't wire up a full config path).
 	ConfigPath string
 	// PreviewProject, if set, is called whenever the cursor moves to a
 	// project row in the list; the returned multi-line string is shown
@@ -179,16 +180,22 @@ type Options struct {
 	// hidden from the help footer (so `boo delete` selection-only
 	// pickers don't advertise actions they can't perform).
 	//
-	// Successful callbacks return nil; the picker then calls
+	// Successful callbacks return nil error; the picker then calls
 	// RefreshItems and re-renders the list. Failed callbacks return an
 	// error which the picker shows on a transient error screen until
 	// the user dismisses it with any key.
+	//
+	// OnDelete returns (warning, error). A non-empty warning string
+	// means deletion succeeded but a non-fatal side-effect (e.g.
+	// closing the Ghostty window) failed; the picker incorporates the
+	// warning into its status message. A non-nil error means deletion
+	// itself failed; the picker shows an error screen.
 	//
 	// Confirmation/UX flow lives in the picker. The CLI side just
 	// performs the side effect — it does NOT prompt or print, because
 	// we're still inside the alt-screen and the picker owns the
 	// presentation.
-	OnDelete    func(name string, purge bool) error
+	OnDelete    func(name string, purge bool) (warning string, err error)
 	OnSetLayout func(name, template string) error
 	// OnEdit applies a pending edit. Receives the original project key
 	// (oldName) plus the user's desired post-edit values. The CLI
@@ -210,11 +217,14 @@ type Options struct {
 	OnOpenLayout func(name string) tea.Cmd
 
 	// RefreshItems is called after a successful action callback. It
-	// returns the new list of items the picker should display. nil =
-	// the picker leaves the existing list in place (which will show
-	// stale data until the user exits and re-enters), so most callers
-	// should set this whenever they set any On* callback.
-	RefreshItems func() []Item
+	// returns the new list of items the picker should display, or an
+	// error if the refresh itself fails. On error the picker logs via
+	// slog and leaves the existing list in place — the user can still
+	// navigate; the next action will re-load the registry under the
+	// lock anyway. On success with a nil or empty slice, the picker
+	// transitions to the empty-state view. nil callback = the picker
+	// leaves the existing list in place (stale data until exit).
+	RefreshItems func() ([]Item, error)
 }
 
 // Run shows the TUI and blocks until the user makes a decision.
@@ -357,9 +367,10 @@ type model struct {
 	screen screen
 
 	// Theme cycler state. themeName tracks the active theme so `T`
-	// knows where in the cycle to advance from. themesDir + configPath
-	// let cycleTheme reload the theme list and persist the choice;
-	// when configPath is empty the keybind is a no-op.
+	// knows where in the cycle to advance from. themesDir lets
+	// cycleTheme reload the full theme list on each keypress.
+	// configPath, when non-empty, causes cycleTheme to persist the
+	// selected theme back to disk after every cycle.
 	themeName  string
 	themesDir  string
 	configPath string
@@ -372,11 +383,11 @@ type model struct {
 	layoutNames         []string                 // shared with form; reused by setLayout sub-screen
 
 	// Action callbacks (see Options docs). nil = action key is disabled.
-	onDelete     func(name string, purge bool) error
+	onDelete     func(name string, purge bool) (warning string, err error)
 	onSetLayout  func(name, template string) error
 	onEdit       func(oldName, newName, newDir, newTemplate string) error
 	onOpenLayout func(name string) tea.Cmd
-	refreshItems func() []Item
+	refreshItems func() ([]Item, error)
 
 	intent    Intent // nil + cancelled=false should not happen; nil + cancelled=true means dismissed
 	cancelled bool
@@ -792,13 +803,17 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 			m.screen = screenList
 			return m, nil
 		}
-		if err := m.onDelete(v.Name, v.Purge); err != nil {
+		warn, err := m.onDelete(v.Name, v.Purge)
+		if err != nil {
 			return m.showError(fmt.Sprintf("delete %q: %v", v.Name, err)), nil
 		}
 		m.refreshList()
-		if v.Purge {
+		switch {
+		case warn != "":
+			m.setStatusOK(fmt.Sprintf("deleted %s (window close failed: %s)", v.Name, warn))
+		case v.Purge:
 			m.setStatusOK(fmt.Sprintf("deleted %s and closed window", v.Name))
-		} else {
+		default:
 			m.setStatusOK(fmt.Sprintf("deleted %s", v.Name))
 		}
 		m.screen = screenList
@@ -847,11 +862,21 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 // refreshList rebuilds the bubbles/list contents from the caller's
 // RefreshItems callback. No-op when the callback wasn't supplied (the
 // list will show stale data until the user exits — caller's choice).
+//
+// On error the existing list is left in place: the user can still
+// navigate and the next action will re-load the registry under the
+// lock anyway. On success with a nil or empty slice the picker shows
+// the empty-state view — this is distinct from an error and is the
+// correct result when all projects have been deleted.
 func (m *model) refreshList() {
 	if m.refreshItems == nil {
 		return
 	}
-	items := m.refreshItems()
+	items, err := m.refreshItems()
+	if err != nil {
+		slog.Warn("picker: refresh failed, keeping existing items", "err", err)
+		return
+	}
 	listItems := make([]list.Item, 0, len(items)+1)
 	for _, it := range items {
 		listItems = append(listItems, it)
@@ -887,15 +912,19 @@ func (m *model) setStatusErr(msg string) {
 }
 
 // cycleTheme advances to the next available theme (built-in + user)
-// in alphabetical order, applies it live to every visible surface
-// (list delegate, list title, form), and persists the choice to
-// config.yaml. Failures fall into the status bar; the cycle still
+// in alphabetical order and applies it live to every visible surface
+// (list delegate, list title, form). When configPath is set the new
+// theme name is written back to disk immediately — comments and other
+// keys in the config file are preserved. On persist failure the
+// in-memory switch still takes effect and the status bar surfaces the
+// write error so the user is informed.
+//
+// Failures in theme loading fall into the status bar; the cycle still
 // advances so the user can keep trying.
 //
-// No-ops gracefully when configPath is empty (read-only callers) or
-// when theme.List returns nothing (impossible in production — the
-// built-in default is always present — but guarded so a packaging
-// bug doesn't crash the TUI).
+// No-ops gracefully when theme.List returns nothing (impossible in
+// production — the built-in default is always present — but guarded
+// so a packaging bug doesn't crash the TUI).
 func (m *model) cycleTheme() {
 	names, err := theme.List(m.themesDir)
 	if err != nil || len(names) == 0 {
@@ -925,18 +954,15 @@ func (m *model) cycleTheme() {
 
 	m.applyTheme(next, t)
 
-	if m.configPath == "" {
-		// Session-only mode (no persistence wired). Still useful for
-		// test harnesses; just don't claim we saved.
-		m.setStatusOK(fmt.Sprintf("theme: %s", next))
-		return
+	// Persist to disk when a config path is available.
+	if m.configPath != "" {
+		if perr := config.SetUITheme(m.configPath, next); perr != nil {
+			slog.Warn("picker: failed to persist theme", "theme", next, "err", perr)
+			m.setStatusOK(fmt.Sprintf("theme: %s (session only — failed to persist: %v)", next, perr))
+			return
+		}
 	}
-
-	if err := config.SetUITheme(m.configPath, next); err != nil {
-		m.setStatusErr(fmt.Sprintf("theme: %s (save failed: %v)", next, err))
-		return
-	}
-	m.setStatusOK(fmt.Sprintf("theme: %s (saved)", next))
+	m.setStatusOK(fmt.Sprintf("theme: %s", next))
 }
 
 // applyTheme swaps the live theme on every surface that caches

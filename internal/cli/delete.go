@@ -14,7 +14,12 @@ import (
 	"github.com/erzz/boo/internal/project"
 )
 
-func newDeleteCmd() *cobra.Command {
+func newDeleteCmd() *cobra.Command { return newDeleteCmdWithApp(nil) }
+
+// newDeleteCmdWithApp is like newDeleteCmd but uses appIn instead of
+// calling newApp() inside RunE.  Pass nil for production behaviour.
+// Used by tests to inject a fake *app.
+func newDeleteCmdWithApp(appIn *app) *cobra.Command {
 	var (
 		purge bool
 		force bool
@@ -35,9 +40,13 @@ close any open Ghostty window for the project.
 You will be asked to confirm; pass --force to skip the prompt.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			a, err := newApp()
-			if err != nil {
-				return err
+			a := appIn
+			if a == nil {
+				var err error
+				a, err = newApp()
+				if err != nil {
+					return err
+				}
 			}
 
 			var name string
@@ -79,7 +88,14 @@ You will be asked to confirm; pass --force to skip the prompt.`,
 					}
 				}
 
-				return executeDelete(c.Context(), a, reg, p, purge, c.OutOrStdout(), c.ErrOrStderr())
+				warn, err := executeDelete(c.Context(), a, reg, p, purge, c.OutOrStdout(), c.ErrOrStderr())
+				if err != nil {
+					return err
+				}
+				if warn != "" {
+					_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: %s\n", warn)
+				}
+				return nil
 			})
 		},
 	}
@@ -91,31 +107,37 @@ You will be asked to confirm; pass --force to skip the prompt.`,
 // executeDelete performs the side-effect half of `boo delete`: optional
 // window-close, registry removal, state-dir purge, and the success line.
 //
+// Returns (warning, error). A non-empty warning indicates a non-fatal
+// side-effect failure (e.g. the Ghostty window close failed) that should
+// be surfaced to the user after a successful deletion. A non-nil error
+// means the deletion itself failed (registry removal or save).
+//
 // Extracted so the bare-`boo` TUI can reuse it after the in-modal
 // confirmation, without re-prompting the user. Callers MUST hold the
 // state lock (a.Paths.WithLock).
-func executeDelete(ctx context.Context, a *app, reg *project.Registry, p project.Project, purge bool, out io.Writer, errw io.Writer) error {
+func executeDelete(ctx context.Context, a *app, reg *project.Registry, p project.Project, purge bool, out io.Writer, errw io.Writer) (string, error) {
+	var closeWarning string
 	if purge {
 		rt, err := project.LoadRuntime(a.Paths, p.Name)
 		if err == nil && rt.WindowID != "" {
 			if err := a.Ghostty.CloseWindow(ctx, rt.WindowID); err != nil {
-				_, _ = fmt.Fprintf(errw, "warning: could not close window %s: %v\n", rt.WindowID, err)
+				closeWarning = fmt.Sprintf("could not close window %s: %v", rt.WindowID, err)
 			}
 		}
 	}
 
 	if err := reg.Remove(p.Name); err != nil {
-		return err
+		return "", err
 	}
 	if err := reg.Save(a.Paths); err != nil {
-		return err
+		return "", err
 	}
 	if err := project.PurgeProjectDir(a.Paths, p.Name); err != nil {
 		// Registry is already updated; report but don't fail.
 		_, _ = fmt.Fprintf(errw, "warning: removed from registry but could not purge state dir: %v\n", err)
 	}
 	_, _ = fmt.Fprintf(out, "Deleted project %q (source dir %s left untouched)\n", p.Name, p.Dir)
-	return nil
+	return closeWarning, nil
 }
 
 // pickProjectForDelete shows the TUI picker in selection-only mode and
