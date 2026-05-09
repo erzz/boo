@@ -53,6 +53,12 @@ func TestCheckVersionRange(t *testing.T) {
 			wantSubstr: "older than minimum",
 		},
 		{
+			name:       "below new minimum is FAIL",
+			ver:        "1.3.0",
+			wantStatus: Fail,
+			wantSubstr: "older than minimum",
+		},
+		{
 			name:       "exactly at min is OK",
 			ver:        supportedGhosttyMin,
 			wantStatus: OK,
@@ -65,21 +71,27 @@ func TestCheckVersionRange(t *testing.T) {
 			wantSubstr: "1.3.5",
 		},
 		{
-			name:       "exactly at ceiling is OK",
-			ver:        maxTestedGhostty,
+			name:       "just below upper bound is OK",
+			ver:        "1.99.99",
 			wantStatus: OK,
-			wantSubstr: maxTestedGhostty,
+			wantSubstr: "1.99.99",
 		},
 		{
-			name:       "above ceiling is WARN",
-			ver:        "2.0.0",
+			name:       "exactly at unsupported floor is WARN",
+			ver:        unsupportedGhosttyFrom,
 			wantStatus: Warn,
-			wantSubstr: "newer than",
+			wantSubstr: unsupportedGhosttyFrom,
+		},
+		{
+			name:       "above unsupported floor is WARN",
+			ver:        "2.1.0",
+			wantStatus: Warn,
+			wantSubstr: "2.0.0",
 		},
 		{
 			name:       "malformed non-numeric segment parses as 0",
-			ver:        "1.3.0-rc1",
-			wantStatus: OK, // "1.3.0" part is in range; "-rc1" parses as 0
+			ver:        "1.4.0-rc1",
+			wantStatus: OK, // "1.4.0" part is in range; "-rc1" parses as 0
 		},
 	}
 	for _, c := range cases {

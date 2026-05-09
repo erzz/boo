@@ -50,15 +50,16 @@ type Result struct {
 	Hint   string
 }
 
-// supportedGhosttyMin is the minimum Ghostty version we've tested against.
-// Older versions may work but the JXA API surface boo relies on first
-// stabilized in 1.3.x.
-const supportedGhosttyMin = "1.3.0"
+// supportedGhosttyMin is the minimum Ghostty version boo has been validated
+// against. Older versions may work but the JXA API surface boo relies on
+// first stabilized in 1.3.x.
+const supportedGhosttyMin = "1.3.1"
 
-// maxTestedGhostty is the highest Ghostty version boo has been explicitly
-// tested against. Versions beyond this produce a WARN so users know to check
-// for compatibility issues but are not blocked from using boo.
-const maxTestedGhostty = "1.3.99"
+// unsupportedGhosttyFrom is the exclusive upper bound on the supported
+// range. Ghostty is pre-2.0 and its AppleScript surface may shift in
+// non-backwards-compatible ways at the 2.0 boundary, so versions at or
+// above this floor produce a WARN until boo has been re-validated.
+const unsupportedGhosttyFrom = "2.0.0"
 
 // CheckFunc takes the running set of results so far and returns the next
 // result. This lets later checks short-circuit based on earlier outcomes.
@@ -295,18 +296,18 @@ func checkVersionRange(ver string) Result {
 			Detail: fmt.Sprintf("version %s is older than minimum supported %s", ver, supportedGhosttyMin),
 			Hint:   fmt.Sprintf("Upgrade Ghostty to >= %s; earlier versions lack JXA API features boo relies on.", supportedGhosttyMin),
 		}
-	case compareVersions(ver, maxTestedGhostty) > 0:
+	case compareVersions(ver, unsupportedGhosttyFrom) >= 0:
 		return Result{
 			Name:   "ghostty version",
 			Status: Warn,
-			Detail: fmt.Sprintf("version %s is newer than the tested ceiling %s", ver, maxTestedGhostty),
-			Hint:   "boo may work fine; it just hasn't been validated against this Ghostty release. Watch for unexpected behaviour.",
+			Detail: fmt.Sprintf("version %s is at or beyond the %s upper bound", ver, unsupportedGhosttyFrom),
+			Hint:   "boo may work fine; it just hasn't been validated against Ghostty 2.x, where the AppleScript surface may have shifted. Watch for unexpected behaviour.",
 		}
 	default:
 		return Result{
 			Name:   "ghostty version",
 			Status: OK,
-			Detail: fmt.Sprintf("version %s (supported range %s – %s)", ver, supportedGhosttyMin, maxTestedGhostty),
+			Detail: fmt.Sprintf("version %s (supported range >= %s, < %s)", ver, supportedGhosttyMin, unsupportedGhosttyFrom),
 		}
 	}
 }
