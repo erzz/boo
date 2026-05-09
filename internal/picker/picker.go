@@ -174,7 +174,23 @@ type Options struct {
 	// Like PreviewTemplate, this is a callback so the picker package
 	// stays free of project-specific dependencies (project.Registry,
 	// project.LoadRuntime, ghostty.WindowExists, etc. live in CLI).
+	//
+	// Prefer PreviewProjectFactory when live theme cycling (T) must be
+	// reflected in the preview — the factory re-creates the closure
+	// with the new theme on each cycle; PreviewProject captures the
+	// theme at construction time and cannot update it.
 	PreviewProject func(name string) string
+
+	// PreviewProjectFactory, if set, supersedes PreviewProject. It is
+	// called once at startup with the initial theme to produce a
+	// PreviewProject closure, and again each time the user cycles the
+	// theme with T. This ensures the preview stays styled with the
+	// live theme after a cycle.
+	//
+	// The closure contract is the same as PreviewProject's: given a
+	// project name, return a styled multi-line string or "" for the
+	// default fallback.
+	PreviewProjectFactory func(thm Theme) func(name string) string
 
 	// Action callbacks. nil = the corresponding key is disabled and
 	// hidden from the help footer (so `boo delete` selection-only
@@ -185,17 +201,17 @@ type Options struct {
 	// error which the picker shows on a transient error screen until
 	// the user dismisses it with any key.
 	//
-	// OnDelete returns (warning, error). A non-empty warning string
-	// means deletion succeeded but a non-fatal side-effect (e.g.
-	// closing the Ghostty window) failed; the picker incorporates the
-	// warning into its status message. A non-nil error means deletion
-	// itself failed; the picker shows an error screen.
+	// OnDelete returns (warnings, error). A non-nil warnings slice means
+	// deletion succeeded but one or more non-fatal side effects (e.g.
+	// closing the Ghostty window, purging the state dir) failed; the
+	// picker incorporates the warnings into its status message. A non-nil
+	// error means deletion itself failed; the picker shows an error screen.
 	//
 	// Confirmation/UX flow lives in the picker. The CLI side just
 	// performs the side effect — it does NOT prompt or print, because
 	// we're still inside the alt-screen and the picker owns the
 	// presentation.
-	OnDelete    func(name string, purge bool) (warning string, err error)
+	OnDelete    func(name string, purge bool) (warnings []string, err error)
 	OnSetLayout func(name, template string) error
 	// OnEdit applies a pending edit. Receives the original project key
 	// (oldName) plus the user's desired post-edit values. The CLI
@@ -291,26 +307,35 @@ func Run(items []Item, opts Options) (Result, error) {
 	formOnly := opts.SkipListGoStraightToForm
 	scr := initialScreen(formOnly, opts.Defaults.AlreadyRegisteredAs)
 
+	// Resolve initial preview function. Factory wins over the bare
+	// function so the preview is styled with the correct theme from
+	// the first render. Both may be nil (selection-only callers).
+	previewFn := opts.PreviewProject
+	if opts.PreviewProjectFactory != nil {
+		previewFn = opts.PreviewProjectFactory(theme)
+	}
+
 	m := &model{
-		list:                l,
-		form:                form,
-		theme:               theme,
-		keys:                keys,
-		screen:              scr,
-		themeName:           opts.Theme,
-		themesDir:           opts.ThemesDir,
-		configPath:          opts.ConfigPath,
-		formOnly:            formOnly,
-		hideNewProject:      opts.HideNewProject,
-		alreadyRegisteredAs: opts.Defaults.AlreadyRegisteredAs,
-		previewProject:      opts.PreviewProject,
-		previewTemplate:     opts.PreviewTemplate,
-		layoutNames:         opts.LayoutNames,
-		onDelete:            opts.OnDelete,
-		onSetLayout:         opts.OnSetLayout,
-		onEdit:              opts.OnEdit,
-		onOpenLayout:        opts.OnOpenLayout,
-		refreshItems:        opts.RefreshItems,
+		list:                  l,
+		form:                  form,
+		theme:                 theme,
+		keys:                  keys,
+		screen:                scr,
+		themeName:             opts.Theme,
+		themesDir:             opts.ThemesDir,
+		configPath:            opts.ConfigPath,
+		formOnly:              formOnly,
+		hideNewProject:        opts.HideNewProject,
+		alreadyRegisteredAs:   opts.Defaults.AlreadyRegisteredAs,
+		previewProject:        previewFn,
+		previewProjectFactory: opts.PreviewProjectFactory,
+		previewTemplate:       opts.PreviewTemplate,
+		layoutNames:           opts.LayoutNames,
+		onDelete:              opts.OnDelete,
+		onSetLayout:           opts.OnSetLayout,
+		onEdit:                opts.OnEdit,
+		onOpenLayout:          opts.OnOpenLayout,
+		refreshItems:          opts.RefreshItems,
 	}
 	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(stderr()))
 	final, err := prog.Run()
@@ -379,11 +404,32 @@ type model struct {
 	hideNewProject      bool   // when true, the form/intent path is unreachable; selection-only mode
 	alreadyRegisteredAs string // shown on the AlreadyRegistered screen
 	previewProject      func(name string) string
-	previewTemplate     func(name string) string // shared with form; reused by setLayout sub-screen
-	layoutNames         []string                 // shared with form; reused by setLayout sub-screen
+	// previewProjectFactory, when non-nil, is used by applyTheme to
+	// re-create previewProject with the new theme on each theme cycle.
+	// This ensures the right pane stays styled with the live theme.
+	previewProjectFactory func(thm Theme) func(name string) string
+	previewTemplate       func(name string) string // shared with form; reused by setLayout sub-screen
+	layoutNames           []string                 // shared with form; reused by setLayout sub-screen
+
+	// Async preview state. previewCache stores the most recently
+	// computed preview string per project name. previewGen is
+	// incremented on every startPreview call so out-of-order
+	// previewReadyMsgs (from rapid cursor movement) are discarded.
+	previewCache map[string]string
+	previewGen   uint64
+
+	// enrichGen is incremented on every startEnrich call. enrichedItemsMsgs
+	// whose gen is older than enrichGen are discarded so a slow startup
+	// enrichment can never overwrite a fresher post-action refresh.
+	enrichGen uint64
 
 	// Action callbacks (see Options docs). nil = action key is disabled.
-	onDelete     func(name string, purge bool) (warning string, err error)
+	//
+	// Successful callbacks return nil error; the picker then calls
+	// RefreshItems and re-renders the list. Failed callbacks return an
+	// error which the picker shows on a transient error screen until
+	// the user dismisses it with any key.
+	onDelete     func(name string, purge bool) (warnings []string, err error)
 	onSetLayout  func(name, template string) error
 	onEdit       func(oldName, newName, newDir, newTemplate string) error
 	onOpenLayout func(name string) tea.Cmd
@@ -527,7 +573,78 @@ func (m *model) splitActive() bool {
 	return m.width >= splitThreshold && m.height >= splitMinHeight
 }
 
-func (m *model) Init() tea.Cmd { return nil }
+func (m *model) Init() tea.Cmd { return tea.Batch(m.startEnrich(), m.startPreview()) }
+
+// previewReadyMsg carries the result of an async preview computation.
+// It is emitted by the tea.Cmd returned from startPreview and applied
+// in Update. gen matches the m.previewGen value at dispatch time so
+// stale results from rapid cursor movement are silently discarded.
+type previewReadyMsg struct {
+	name    string
+	preview string
+	gen     uint64
+}
+
+// enrichedItemsMsg carries the result of an async item-enrichment run.
+// It is sent both by Init (initial startup enrichment) and by startEnrich
+// (post-action refresh). The model applies it in Update, which runs on the
+// Bubble Tea dispatch loop — no locking required.
+// gen matches the m.enrichGen value at dispatch time so out-of-order
+// results (e.g. a slow startup enrichment arriving after a post-delete
+// refresh) are silently discarded.
+type enrichedItemsMsg struct {
+	items []Item
+	err   error
+	gen   uint64
+}
+
+// startEnrich returns a tea.Cmd that calls the RefreshItems callback
+// asynchronously and sends an enrichedItemsMsg when it completes.
+// Returns nil when no RefreshItems callback is configured (e.g. in the
+// selection-only delete picker), which is a safe no-op for tea.Batch.
+//
+// Each call increments m.enrichGen. The captured gen is embedded in the
+// resulting enrichedItemsMsg so the Update handler can discard results
+// from older in-flight calls (staleness protection).
+func (m *model) startEnrich() tea.Cmd {
+	if m.refreshItems == nil {
+		return nil
+	}
+	m.enrichGen++
+	gen := m.enrichGen
+	fn := m.refreshItems
+	return func() tea.Msg {
+		items, err := fn()
+		return enrichedItemsMsg{items: items, err: err, gen: gen}
+	}
+}
+
+// startPreview returns a tea.Cmd that invokes the PreviewProject callback
+// asynchronously for the currently-selected item and sends a
+// previewReadyMsg when it completes. Returns nil when no callback is
+// configured or when the selected item is not an Item (e.g. newProjectItem
+// or empty list).
+//
+// Each call increments m.previewGen. The captured gen is embedded in the
+// resulting previewReadyMsg so stale results from rapid cursor movement
+// are silently discarded in Update.
+func (m *model) startPreview() tea.Cmd {
+	if m.previewProject == nil {
+		return nil
+	}
+	it, ok := m.list.SelectedItem().(Item)
+	if !ok {
+		return nil
+	}
+	m.previewGen++
+	gen := m.previewGen
+	name := it.Key
+	fn := m.previewProject
+	return func() tea.Msg {
+		preview := fn(name)
+		return previewReadyMsg{name: name, preview: preview, gen: gen}
+	}
+}
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if sz, ok := msg.(tea.WindowSizeMsg); ok {
@@ -574,9 +691,52 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if fin.err != nil {
 			return m.showError(fmt.Sprintf("editor: %v", fin.err)), nil
 		}
-		m.refreshList()
 		m.setStatusOK("layout file saved")
+		return m, m.startEnrich()
+	}
+
+	// previewReadyMsg is sent by startPreview when the async preview
+	// computation completes. Store the result in the cache. Discard
+	// stale results (gen < m.previewGen) that were overtaken by a newer
+	// cursor movement or theme cycle.
+	if msg, ok := msg.(previewReadyMsg); ok {
+		if msg.gen >= m.previewGen {
+			if m.previewCache == nil {
+				m.previewCache = make(map[string]string)
+			}
+			m.previewCache[msg.name] = msg.preview
+		}
 		return m, nil
+	}
+
+	// enrichedItemsMsg is sent by startEnrich (fired from Init on startup
+	// and from runIntent after mutating actions). Discard stale results
+	// (gen < m.enrichGen) that were overtaken by a newer enrichment — this
+	// prevents a slow startup enrichment from overwriting a post-delete
+	// refresh that already ran. Apply the new item list on success.
+	if msg, ok := msg.(enrichedItemsMsg); ok {
+		if msg.gen < m.enrichGen {
+			// Stale: a newer enrichment has been started after this
+			// one was dispatched. Discard unconditionally.
+			return m, nil
+		}
+		if msg.err != nil {
+			slog.Warn("picker: refresh failed, keeping existing items", "err", msg.err)
+			return m, nil
+		}
+		listItems := make([]list.Item, 0, len(msg.items)+1)
+		for _, it := range msg.items {
+			listItems = append(listItems, it)
+		}
+		if !m.hideNewProject {
+			listItems = append(listItems, newProjectItem{})
+		}
+		m.list.SetItems(listItems)
+		// Invalidate the preview cache: enrichment updates Status and
+		// Trailing which projectPreviewer reflects in the right pane.
+		// Dispatch a fresh preview so the right pane catches up.
+		m.previewCache = nil
+		return m, m.startPreview()
 	}
 
 	switch m.screen {
@@ -659,10 +819,9 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 				}
-			case matches(m.keys.CycleTheme, pressed):
-				m.cycleTheme()
-				return m, nil
-			case matches(m.keys.Select, pressed):
+		case matches(m.keys.CycleTheme, pressed):
+			return m, m.cycleTheme()
+		case matches(m.keys.Select, pressed):
 				switch v := m.list.SelectedItem().(type) {
 				case Item:
 					m.intent = SwitchIntent{Name: v.Key}
@@ -677,8 +836,22 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	// Track the selected item before delegating to the list model so
+	// we can detect cursor movement and dispatch a fresh preview.
+	prevKey := ""
+	if it, ok := m.list.SelectedItem().(Item); ok {
+		prevKey = it.Key
+	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
+	// If the selection changed, dispatch an async preview for the new item.
+	newKey := ""
+	if it, ok := m.list.SelectedItem().(Item); ok {
+		newKey = it.Key
+	}
+	if newKey != "" && newKey != prevKey {
+		cmd = tea.Batch(cmd, m.startPreview())
+	}
 	return m, cmd
 }
 
@@ -803,21 +976,30 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 			m.screen = screenList
 			return m, nil
 		}
-		warn, err := m.onDelete(v.Name, v.Purge)
+		warns, err := m.onDelete(v.Name, v.Purge)
 		if err != nil {
 			return m.showError(fmt.Sprintf("delete %q: %v", v.Name, err)), nil
 		}
-		m.refreshList()
 		switch {
-		case warn != "":
-			m.setStatusOK(fmt.Sprintf("deleted %s (window close failed: %s)", v.Name, warn))
+		case len(warns) > 1:
+			// Multiple non-fatal side-effect failures: log all of them
+			// and inline the first warning plus a count so TUI users see
+			// at least one concrete message (slog output isn't visible
+			// inside the alt-screen).
+			for _, w := range warns {
+				slog.Warn("picker: delete warning", "project", v.Name, "warning", w)
+			}
+			m.setStatusOK(fmt.Sprintf("deleted %q (%s; +%d more)", v.Name, warns[0], len(warns)-1))
+		case len(warns) == 1:
+			slog.Warn("picker: delete warning", "project", v.Name, "warning", warns[0])
+			m.setStatusOK(fmt.Sprintf("deleted %q (%s)", v.Name, warns[0]))
 		case v.Purge:
 			m.setStatusOK(fmt.Sprintf("deleted %s and closed window", v.Name))
 		default:
 			m.setStatusOK(fmt.Sprintf("deleted %s", v.Name))
 		}
 		m.screen = screenList
-		return m, nil
+		return m, m.startEnrich()
 	case SetLayoutIntent:
 		if m.onSetLayout == nil {
 			m.screen = screenList
@@ -826,10 +1008,12 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 		if err := m.onSetLayout(v.Name, v.Template); err != nil {
 			return m.showError(fmt.Sprintf("set layout for %q to %q: %v", v.Name, v.Template, err)), nil
 		}
-		m.refreshList()
 		m.setStatusOK(fmt.Sprintf("set layout for %s to %s", v.Name, v.Template))
+		// Invalidate the cached preview for this project — the layout
+		// template changed and the preview would otherwise show stale data.
+		delete(m.previewCache, v.Name)
 		m.screen = screenList
-		return m, nil
+		return m, m.startEnrich()
 	case EditIntent:
 		if m.onEdit == nil {
 			m.screen = screenList
@@ -838,7 +1022,6 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 		if err := m.onEdit(v.OldName, v.NewName, v.NewDir, v.NewTemplate); err != nil {
 			return m.showError(fmt.Sprintf("edit %q: %v", v.OldName, err)), nil
 		}
-		m.refreshList()
 		// Status describes what changed concisely; if the rename
 		// happened, lead with old→new, otherwise just the project name.
 		if v.OldName != v.NewName {
@@ -846,11 +1029,15 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatusOK(fmt.Sprintf("edited %s", v.NewName))
 		}
+		// Invalidate cached previews for both old and new name (the
+		// name, dir, or template may have changed).
+		delete(m.previewCache, v.OldName)
+		delete(m.previewCache, v.NewName)
 		// Drop the form back to new-project mode so the next 'n' press
 		// doesn't surprise the user with leftover edit state.
 		m.form.setEditMode(false, "")
 		m.screen = screenList
-		return m, nil
+		return m, m.startEnrich()
 	default:
 		// Unknown intent — defensive; should be impossible because the
 		// sealed interface forbids external implementations.
@@ -925,11 +1112,15 @@ func (m *model) setStatusErr(msg string) {
 // No-ops gracefully when theme.List returns nothing (impossible in
 // production — the built-in default is always present — but guarded
 // so a packaging bug doesn't crash the TUI).
-func (m *model) cycleTheme() {
+//
+// Returns a tea.Cmd that re-dispatches the preview for the selected
+// item with the new theme (only meaningful when a PreviewProjectFactory
+// is configured — applyTheme handles the cache invalidation).
+func (m *model) cycleTheme() tea.Cmd {
 	names, err := theme.List(m.themesDir)
 	if err != nil || len(names) == 0 {
 		m.setStatusErr(fmt.Sprintf("themes: %v", err))
-		return
+		return nil
 	}
 
 	// Find current position; default to -1 so an unknown current
@@ -949,26 +1140,33 @@ func (m *model) cycleTheme() {
 		// theme.List returned a name that ThemeByName couldn't load.
 		// Skip it and report — the user can keep cycling past it.
 		m.setStatusErr(fmt.Sprintf("theme %q failed to load", next))
-		return
+		return nil
 	}
 
 	m.applyTheme(next, t)
+	previewCmd := m.startPreview()
 
 	// Persist to disk when a config path is available.
 	if m.configPath != "" {
 		if perr := config.SetUITheme(m.configPath, next); perr != nil {
 			slog.Warn("picker: failed to persist theme", "theme", next, "err", perr)
 			m.setStatusOK(fmt.Sprintf("theme: %s (session only — failed to persist: %v)", next, perr))
-			return
+			return previewCmd
 		}
 	}
 	m.setStatusOK(fmt.Sprintf("theme: %s", next))
+	return previewCmd
 }
 
 // applyTheme swaps the live theme on every surface that caches
 // lipgloss styles. Centralised here so future theme-mutating paths
 // (e.g. a `boo themes pick` modal) reuse the same propagation rules
 // and don't leave half the UI rendering in the old palette.
+//
+// When a PreviewProjectFactory is configured, applyTheme re-creates
+// the previewProject closure with the new theme so subsequent async
+// preview dispatches render with the correct palette. The preview cache
+// is also cleared so stale themed previews are not shown.
 func (m *model) applyTheme(name string, t Theme) {
 	m.theme = t
 	m.themeName = name
@@ -980,6 +1178,15 @@ func (m *model) applyTheme(name string, t Theme) {
 
 	// The form caches its own theme — propagate.
 	m.form.theme = t
+
+	// Re-create the preview closure with the new theme so the right
+	// pane stays colour-consistent with the rest of the UI. Clear the
+	// cache so stale themed strings are not shown while the fresh
+	// preview loads.
+	if m.previewProjectFactory != nil {
+		m.previewProject = m.previewProjectFactory(t)
+		m.previewCache = nil
+	}
 }
 
 // updateError dismisses the error screen on any keypress and returns to
@@ -1253,12 +1460,23 @@ func clipToHeight(s string, height int) string {
 }
 
 // renderItemDetail builds the right-pane content for a project Item.
-// Falls back to the Item's own fields if no PreviewProject callback was
-// wired (e.g. selection-only callers like `boo delete`).
+// Reads from the async preview cache (populated by startPreview via
+// previewReadyMsg) so View() stays I/O-free. On a cache miss the item
+// has not yet been previewed — render a lightweight "loading…"
+// placeholder so the pane is never blank. Falls back to the Item's
+// own fields when no PreviewProject callback was wired (e.g.
+// selection-only callers like `boo delete`).
 func (m *model) renderItemDetail(it Item, _ int) string {
 	if m.previewProject != nil {
-		if rendered := m.previewProject(it.Key); rendered != "" {
-			return rendered
+		// Accessing a nil map is safe in Go — it returns ("", false).
+		if cached, hit := m.previewCache[it.Key]; hit {
+			if cached != "" {
+				return cached
+			}
+			// Callback returned empty: fall through to the Item fallback.
+		} else {
+			// Not yet in the cache: the async cmd is in-flight.
+			return m.theme.RightPaneFaint.Render("loading…")
 		}
 	}
 	// Minimal fallback from the Item itself.

@@ -88,12 +88,13 @@ You will be asked to confirm; pass --force to skip the prompt.`,
 					}
 				}
 
-				warn, err := executeDelete(c.Context(), a, reg, p, purge, c.OutOrStdout(), c.ErrOrStderr())
+				warns, err := executeDelete(c.Context(), a, reg, p, purge)
 				if err != nil {
 					return err
 				}
-				if warn != "" {
-					_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: %s\n", warn)
+				_, _ = fmt.Fprintf(c.OutOrStdout(), "Deleted project %q (source dir %s left untouched)\n", p.Name, p.Dir)
+				for _, w := range warns {
+					_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: %s\n", w)
 				}
 				return nil
 			})
@@ -105,39 +106,39 @@ You will be asked to confirm; pass --force to skip the prompt.`,
 }
 
 // executeDelete performs the side-effect half of `boo delete`: optional
-// window-close, registry removal, state-dir purge, and the success line.
+// window-close, registry removal, and state-dir purge.
 //
-// Returns (warning, error). A non-empty warning indicates a non-fatal
-// side-effect failure (e.g. the Ghostty window close failed) that should
-// be surfaced to the user after a successful deletion. A non-nil error
-// means the deletion itself failed (registry removal or save).
+// Returns (warnings, error). warnings accumulates all non-fatal side-effect
+// failures (e.g. CloseWindow failed, state-dir purge failed). A non-nil
+// error means the deletion itself failed (registry removal or save). The
+// success line is NOT printed here — callers decide how to surface it (CLI
+// prints to stdout; the TUI picker sets a status bar message).
 //
 // Extracted so the bare-`boo` TUI can reuse it after the in-modal
 // confirmation, without re-prompting the user. Callers MUST hold the
 // state lock (a.Paths.WithLock).
-func executeDelete(ctx context.Context, a *app, reg *project.Registry, p project.Project, purge bool, out io.Writer, errw io.Writer) (string, error) {
-	var closeWarning string
+func executeDelete(ctx context.Context, a *app, reg *project.Registry, p project.Project, purge bool) ([]string, error) {
+	var warnings []string
 	if purge {
 		rt, err := project.LoadRuntime(a.Paths, p.Name)
 		if err == nil && rt.WindowID != "" {
 			if err := a.Ghostty.CloseWindow(ctx, rt.WindowID); err != nil {
-				closeWarning = fmt.Sprintf("could not close window %s: %v", rt.WindowID, err)
+				warnings = append(warnings, fmt.Sprintf("could not close window %s: %v", rt.WindowID, err))
 			}
 		}
 	}
 
 	if err := reg.Remove(p.Name); err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := reg.Save(a.Paths); err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := project.PurgeProjectDir(a.Paths, p.Name); err != nil {
 		// Registry is already updated; report but don't fail.
-		_, _ = fmt.Fprintf(errw, "warning: removed from registry but could not purge state dir: %v\n", err)
+		warnings = append(warnings, fmt.Sprintf("removed from registry but could not purge state dir: %v", err))
 	}
-	_, _ = fmt.Fprintf(out, "Deleted project %q (source dir %s left untouched)\n", p.Name, p.Dir)
-	return closeWarning, nil
+	return warnings, nil
 }
 
 // pickProjectForDelete shows the TUI picker in selection-only mode and
@@ -155,7 +156,9 @@ func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 	res, err := picker.Run(items, picker.Options{
 		Title:          "boo — delete project",
 		HideNewProject: true,
-		PreviewProject: projectPreviewer(ctx, a),
+		PreviewProjectFactory: func(thm picker.Theme) func(string) string {
+			return projectPreviewer(ctx, a, thm)
+		},
 		Theme:          a.Config.ThemeOr("default"),
 		ThemesDir:      a.Paths.ThemesDir,
 		ConfigPath:     a.Paths.ConfigFile,

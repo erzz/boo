@@ -34,13 +34,13 @@ func pressKey(t *testing.T, m *model, s string) *model {
 func modelWithDelete(items ...Item) (*model, *[]string) {
 	m := sizedModel(120, items...)
 	calls := []string{}
-	m.onDelete = func(name string, purge bool) (string, error) {
+	m.onDelete = func(name string, purge bool) ([]string, error) {
 		tag := name
 		if purge {
 			tag += "+purge"
 		}
 		calls = append(calls, tag)
-		return "", nil
+		return nil, nil
 	}
 	m.refreshItems = func() ([]Item, error) { return items, nil } // no-op refresh
 	return m, &calls
@@ -117,7 +117,7 @@ func TestConfirm_YesInvokesCallback(t *testing.T) {
 // (rather than emitting an intent or silently succeeding).
 func TestConfirm_YesErrorShowsErrorScreen(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/alpha"})
-	m.onDelete = func(name string, purge bool) (string, error) { return "", errFake }
+	m.onDelete = func(name string, purge bool) ([]string, error) { return nil, errFake }
 	m.refreshItems = func() ([]Item, error) { return nil, nil }
 
 	m = pressKey(t, m, "d")

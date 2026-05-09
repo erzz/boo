@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -41,8 +40,8 @@ func makeAppWithFailingClose(t *testing.T) *app {
 // TestExecuteDelete_PurgeWindowCloseFailure_WarningIsReturned verifies that
 // when CloseWindow fails during a purge delete:
 //   - The deletion itself still succeeds (project removed from registry).
-//   - A non-empty warning string is returned instead of an error.
-//   - The warning mentions the window ID.
+//   - A non-empty warnings slice is returned instead of an error.
+//   - The first warning mentions the window ID.
 func TestExecuteDelete_PurgeWindowCloseFailure_WarningIsReturned(t *testing.T) {
 	a := makeAppWithFailingClose(t)
 	dir := t.TempDir()
@@ -53,8 +52,7 @@ func TestExecuteDelete_PurgeWindowCloseFailure_WarningIsReturned(t *testing.T) {
 		t.Fatalf("SaveRuntime: %v", err)
 	}
 
-	var out, errw bytes.Buffer
-	var warn string
+	var warns []string
 	err := a.Paths.WithLock(func() error {
 		reg, err := project.Load(a.Paths)
 		if err != nil {
@@ -64,18 +62,19 @@ func TestExecuteDelete_PurgeWindowCloseFailure_WarningIsReturned(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		warn, err = executeDelete(context.Background(), a, reg, p, true /*purge*/, &out, &errw)
-		return err
+		var werr error
+		warns, werr = executeDelete(context.Background(), a, reg, p, true /*purge*/)
+		return werr
 	})
 
 	if err != nil {
 		t.Fatalf("executeDelete returned error %v; want success (deletion must not be blocked by close failure)", err)
 	}
-	if warn == "" {
-		t.Fatal("expected non-empty warning when CloseWindow fails, got empty string")
+	if len(warns) == 0 {
+		t.Fatal("expected non-empty warnings when CloseWindow fails, got empty slice")
 	}
-	if !strings.Contains(warn, "w-deadbeef") {
-		t.Errorf("warning %q should mention the window ID %q", warn, "w-deadbeef")
+	if !strings.Contains(warns[0], "w-deadbeef") {
+		t.Errorf("warning %q should mention the window ID %q", warns[0], "w-deadbeef")
 	}
 
 	// Project must be gone from the registry.
@@ -91,13 +90,12 @@ func TestExecuteDelete_PurgeWindowCloseFailure_WarningIsReturned(t *testing.T) {
 // TestExecuteDelete_NoPurge_NoWarning verifies that without --purge no
 // warning is returned (no attempt to close the window is made).
 func TestExecuteDelete_NoPurge_NoWarning(t *testing.T) {
-	// Even with a failing Ghostty, purge=false should produce no warning.
+	// Even with a failing Ghostty, purge=false should produce no warnings.
 	a := makeAppWithFailingClose(t)
 	dir := t.TempDir()
 	registerProjectForTest(t, a, "proj", dir, "triple")
 
-	var out, errw bytes.Buffer
-	var warn string
+	var warns []string
 	err := a.Paths.WithLock(func() error {
 		reg, err := project.Load(a.Paths)
 		if err != nil {
@@ -107,20 +105,21 @@ func TestExecuteDelete_NoPurge_NoWarning(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		warn, err = executeDelete(context.Background(), a, reg, p, false /*purge*/, &out, &errw)
-		return err
+		var werr error
+		warns, werr = executeDelete(context.Background(), a, reg, p, false /*purge*/)
+		return werr
 	})
 
 	if err != nil {
 		t.Fatalf("executeDelete: %v", err)
 	}
-	if warn != "" {
-		t.Errorf("expected empty warning without --purge, got %q", warn)
+	if len(warns) != 0 {
+		t.Errorf("expected empty warnings without --purge, got %v", warns)
 	}
 }
 
 // TestExecuteDelete_PurgeWindowCloseSuccess_NoWarning verifies the happy path:
-// when CloseWindow succeeds the warning is empty.
+// when CloseWindow succeeds the warnings slice is empty.
 func TestExecuteDelete_PurgeWindowCloseSuccess_NoWarning(t *testing.T) {
 	a := makeAppForCmds(t) // default fake returns success for osascript
 	dir := t.TempDir()
@@ -137,8 +136,7 @@ func TestExecuteDelete_PurgeWindowCloseSuccess_NoWarning(t *testing.T) {
 	})
 	a.Ghostty = ghostty.New(fake)
 
-	var out, errw bytes.Buffer
-	var warn string
+	var warns []string
 	err := a.Paths.WithLock(func() error {
 		reg, err := project.Load(a.Paths)
 		if err != nil {
@@ -148,15 +146,16 @@ func TestExecuteDelete_PurgeWindowCloseSuccess_NoWarning(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		warn, err = executeDelete(context.Background(), a, reg, p, true /*purge*/, &out, &errw)
-		return err
+		var werr error
+		warns, werr = executeDelete(context.Background(), a, reg, p, true /*purge*/)
+		return werr
 	})
 
 	if err != nil {
 		t.Fatalf("executeDelete: %v", err)
 	}
-	if warn != "" {
-		t.Errorf("expected empty warning when close succeeds, got %q", warn)
+	if len(warns) != 0 {
+		t.Errorf("expected empty warnings when close succeeds, got %v", warns)
 	}
 }
 

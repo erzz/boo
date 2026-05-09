@@ -147,3 +147,61 @@ func TestCycleTheme_WrapsAround(t *testing.T) {
 		t.Errorf("wrap happened in %d cycle — need more than one built-in theme", advanced)
 	}
 }
+
+// ─── Should-fix 4: Theme cycling must refresh preview via factory ─────────────
+
+// TestCycleTheme_InvalidatesPreviewCache verifies that when a
+// PreviewProjectFactory is configured, cycleTheme:
+//   - calls the factory with the new theme so previewProject is updated, and
+//   - clears the previewCache so stale themed strings are not shown.
+//
+// It also confirms that a non-nil tea.Cmd is returned so the caller can
+// dispatch a fresh async preview for the selected item.
+func TestCycleTheme_InvalidatesPreviewCache(t *testing.T) {
+	th := defaultTheme()
+	l := list.New([]list.Item{Item{Key: "proj", Title: "proj"}}, newDelegate(th), 80, 24)
+
+	factoryCalls := 0
+	m := &model{
+		list:      l,
+		theme:     th,
+		themeName: "default",
+		keys:      defaultKeyMap(),
+		// Factory produces a closure that embeds a unique marker so we can
+		// verify it was called and that previewProject was updated.
+		previewProjectFactory: func(_ Theme) func(string) string {
+			factoryCalls++
+			return func(name string) string {
+				return "factory-preview-v2-" + name
+			}
+		},
+		// Seed previewProject with the "old" closure to detect replacement.
+		previewProject: func(name string) string {
+			return "factory-preview-v1-" + name
+		},
+	}
+	// Pre-populate the cache with a "stale" entry from the old theme.
+	m.previewCache = map[string]string{"proj": "factory-preview-v1-proj"}
+
+	// Cycle the theme. applyTheme should call the factory and clear the cache.
+	cmd := m.cycleTheme()
+
+	if m.previewCache != nil {
+		t.Error("previewCache must be nil after theme cycle — stale themed previews must be discarded")
+	}
+	if factoryCalls != 1 {
+		t.Errorf("factory called %d times after cycleTheme, want 1", factoryCalls)
+	}
+	// A new preview must be queued so the right pane refreshes with the new theme.
+	if cmd == nil {
+		t.Error("cycleTheme must return a non-nil cmd to trigger fresh async preview dispatch")
+	}
+	// The factory updated previewProject — verify by calling it directly.
+	if m.previewProject == nil {
+		t.Fatal("previewProject must be non-nil after factory call in applyTheme")
+	}
+	if got := m.previewProject("proj"); got != "factory-preview-v2-proj" {
+		t.Errorf("previewProject after cycle = %q, want %q (factory must have updated the closure)",
+			got, "factory-preview-v2-proj")
+	}
+}

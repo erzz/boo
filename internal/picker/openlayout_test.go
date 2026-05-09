@@ -97,8 +97,13 @@ func TestEditorFinishedMsg_SuccessRefreshes(t *testing.T) {
 		return []Item{{Key: "alpha", Title: "alpha", Description: "/tmp/a"}}, nil
 	}
 
-	updated, _ := m.Update(NewEditorFinishedMsg(nil))
+	updated, cmd := m.Update(NewEditorFinishedMsg(nil))
 	mm := updated.(*model)
+	// startEnrich() returns a tea.Cmd that calls RefreshItems asynchronously.
+	// Execute it manually here so the counter is visible synchronously in the test.
+	if cmd != nil {
+		cmd()
+	}
 	if refreshCalls != 1 {
 		t.Errorf("RefreshItems called %d times, want 1", refreshCalls)
 	}

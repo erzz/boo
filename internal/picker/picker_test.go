@@ -242,13 +242,13 @@ func TestRefreshList_NilSliceSuccessShowsEmptyState(t *testing.T) {
 // Fix 2: delete with purge + window-close failure must surface the warning.
 
 // TestRunIntent_DeletePurge_WindowCloseWarning verifies that when the
-// onDelete callback returns a non-empty warning string (window close
+// onDelete callback returns a non-empty warnings slice (window close
 // failed) the status bar reflects it rather than claiming success.
 func TestRunIntent_DeletePurge_WindowCloseWarning(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	m := newTestModel(alpha)
-	m.onDelete = func(name string, purge bool) (string, error) {
-		return "could not close window w1: connection refused", nil
+	m.onDelete = func(name string, purge bool) ([]string, error) {
+		return []string{"could not close window w1: connection refused"}, nil
 	}
 	m.refreshItems = func() ([]Item, error) { return []Item{}, nil }
 
@@ -261,7 +261,8 @@ func TestRunIntent_DeletePurge_WindowCloseWarning(t *testing.T) {
 	if mm.status.text == "" {
 		t.Fatal("status text should be non-empty")
 	}
-	const want = "window close failed"
+	// Single warning: status should contain the warning text.
+	const want = "could not close"
 	if !strings.Contains(mm.status.text, want) {
 		t.Errorf("status = %q, want it to contain %q", mm.status.text, want)
 	}
@@ -272,8 +273,8 @@ func TestRunIntent_DeletePurge_WindowCloseWarning(t *testing.T) {
 func TestRunIntent_DeletePurge_NoWarning(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	m := newTestModel(alpha)
-	m.onDelete = func(name string, purge bool) (string, error) {
-		return "", nil // success, no warning
+	m.onDelete = func(name string, purge bool) ([]string, error) {
+		return nil, nil // success, no warnings
 	}
 	m.refreshItems = func() ([]Item, error) { return []Item{}, nil }
 
@@ -295,8 +296,8 @@ func TestRunIntent_Delete_ErrorPreservesItems(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	m := newTestModel(alpha)
 	refreshCalled := false
-	m.onDelete = func(name string, purge bool) (string, error) {
-		return "", errors.New("registry locked")
+	m.onDelete = func(name string, purge bool) ([]string, error) {
+		return nil, errors.New("registry locked")
 	}
 	m.refreshItems = func() ([]Item, error) {
 		refreshCalled = true
@@ -311,5 +312,232 @@ func TestRunIntent_Delete_ErrorPreservesItems(t *testing.T) {
 	}
 	if refreshCalled {
 		t.Error("refreshItems must not be called when onDelete returns an error")
+	}
+}
+
+// Fix 1 (extended): Both window-close AND state-dir purge warnings must be
+// surfaced when the picker uses the in-loop delete callback.
+//
+// This test verifies the critical gap the reviewer identified: the picker
+// was previously discarding state-dir purge failures via io.Discard. With
+// the []string return type every non-fatal failure is visible.
+func TestRunIntent_Delete_MultipleWarnings(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha"}
+	m := newTestModel(alpha)
+	m.onDelete = func(name string, purge bool) ([]string, error) {
+		return []string{
+			"could not close window w1: connection refused",
+			"removed from registry but could not purge state dir: permission denied",
+		}, nil
+	}
+	m.refreshItems = func() ([]Item, error) { return []Item{}, nil }
+
+	updated, _ := m.runIntent(DeleteIntent{Name: "alpha", Purge: true})
+	mm := updated.(*model)
+
+	if mm.status.isErr {
+		t.Fatal("status should not be an error (deletion succeeded despite side-effect failures)")
+	}
+	// Multiple warnings: status must inline the first warning and show a
+	// "+N more" suffix so TUI users see at least one concrete message
+	// (slog output is not visible inside the alt-screen).
+	const wantFirstWarn = "could not close"
+	const wantMoreSuffix = "+1 more"
+	if !strings.Contains(mm.status.text, wantFirstWarn) {
+		t.Errorf("status = %q, want it to contain first warning %q", mm.status.text, wantFirstWarn)
+	}
+	if !strings.Contains(mm.status.text, wantMoreSuffix) {
+		t.Errorf("status = %q, want it to contain %q (so users know there are additional warnings)", mm.status.text, wantMoreSuffix)
+	}
+}
+
+// ─── Fix 3: Async picker startup ─────────────────────────────────────────────
+
+// TestInit_ReturnsEnrichCmdWhenRefreshSet verifies that Init() returns a
+// non-nil tea.Cmd when a RefreshItems callback is configured. The cmd is the
+// async enrichment kick-off; nil would mean the picker never enriches items.
+func TestInit_ReturnsEnrichCmdWhenRefreshSet(t *testing.T) {
+	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
+	m.refreshItems = func() ([]Item, error) { return nil, nil }
+
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("Init() must return a non-nil cmd when refreshItems is set")
+	}
+}
+
+// TestInit_NilWhenNoRefreshItems verifies that Init() returns nil (no-op) when
+// no RefreshItems callback is configured — e.g. in the delete-picker which
+// uses pre-enriched items.
+func TestInit_NilWhenNoRefreshItems(t *testing.T) {
+	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
+	// m.refreshItems intentionally nil
+
+	cmd := m.Init()
+	if cmd != nil {
+		t.Fatal("Init() must return nil when refreshItems is not set")
+	}
+}
+
+// TestEnrichedItemsMsg_UpdatesItemList verifies that when an enrichedItemsMsg
+// arrives the model replaces the current item list with the enriched items.
+// This is the core of the async startup enrichment path.
+func TestEnrichedItemsMsg_UpdatesItemList(t *testing.T) {
+	// Start with a bare item (no Status — as if built by buildBareItems).
+	bare := Item{Key: "alpha", Title: "alpha", Status: ""}
+	m := newTestModel(bare)
+	m.hideNewProject = true
+
+	// Send the enrichedItemsMsg with a status-enriched version.
+	enriched := []Item{{Key: "alpha", Title: "alpha", Status: "running"}}
+	updated, _ := m.Update(enrichedItemsMsg{items: enriched, err: nil})
+	mm := updated.(*model)
+
+	got := mm.list.Items()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 item after enrichment, got %d", len(got))
+	}
+	it, ok := got[0].(Item)
+	if !ok {
+		t.Fatalf("expected Item, got %T", got[0])
+	}
+	if it.Status != "running" {
+		t.Errorf("Status = %q after enrichment, want %q", it.Status, "running")
+	}
+}
+
+// TestEnrichedItemsMsg_ErrorPreservesItems verifies that an enrichedItemsMsg
+// carrying an error leaves the existing item list intact.
+func TestEnrichedItemsMsg_ErrorPreservesItems(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha", Status: "stopped"}
+	m := newTestModel(alpha)
+	m.hideNewProject = true
+
+	updated, _ := m.Update(enrichedItemsMsg{err: errors.New("ghostty unreachable")})
+	mm := updated.(*model)
+
+	got := mm.list.Items()
+	if len(got) != 1 {
+		t.Fatalf("expected original 1 item preserved on error, got %d", len(got))
+	}
+}
+
+// TestView_DoesNotMutateModel verifies that View() is pure: calling it
+// multiple times must not change any model fields (screen, status, etc.).
+// This is the Bubble Tea contract: View must be a pure projection of model
+// state, never a place where side effects sneak in.
+func TestView_DoesNotMutateModel(t *testing.T) {
+	m := newTestModel(
+		Item{Key: "alpha", Title: "alpha", Status: "stopped"},
+		Item{Key: "beta", Title: "beta", Status: "running"},
+	)
+	// Give the model plausible dimensions so View() takes the common code
+	// path (bordered panes + status bar).
+	m.width = 120
+	m.height = 40
+
+	screenBefore := m.screen
+	statusBefore := m.status
+
+	_ = m.View()
+	_ = m.View()
+	_ = m.View()
+
+	if m.screen != screenBefore {
+		t.Errorf("View() mutated screen: %v → %v", screenBefore, m.screen)
+	}
+	if m.status != statusBefore {
+		t.Errorf("View() mutated status: before=%v after=%v", statusBefore, m.status)
+	}
+}
+
+// ─── Must-fix 1: View() must not invoke the PreviewProject callback ───────────
+
+// TestView_DoesNotInvokePreviewCallback asserts that View() is I/O-free: the
+// PreviewProject callback must never be called directly from within View(). The
+// preview is dispatched as a tea.Cmd (from startPreview / Init) and applied in
+// Update; View() only reads from the previewCache.
+//
+// This test would have caught the original bug: previewProject was called
+// synchronously inside renderItemDetail → viewRightPane → viewList → View().
+func TestView_DoesNotInvokePreviewCallback(t *testing.T) {
+	m := newTestModel(
+		Item{Key: "alpha", Title: "alpha", Status: "stopped"},
+	)
+	m.width = 120
+	m.height = 40
+
+	called := false
+	m.previewProject = func(name string) string {
+		called = true
+		t.Errorf("previewProject was called directly from View() for project %q — View() must be I/O-free", name)
+		return "preview"
+	}
+
+	// Init() returns a tea.Cmd that would eventually invoke previewProject
+	// asynchronously — but we do not execute it here. We just verify that
+	// calling View() directly does NOT invoke the callback.
+	_ = m.Init()
+	_ = m.View()
+	_ = m.View()
+
+	if called {
+		t.Error("View() invoked the previewProject callback — View() must only read from previewCache")
+	}
+}
+
+// ─── Must-fix 2: Stale enrichment results must be discarded ──────────────────
+
+// TestEnrichment_OldResultIgnored verifies that when two enrichment rounds
+// are started and the older one finishes last, its result is silently dropped
+// and the model retains the original (unenriched) state until the newer result
+// arrives.
+//
+// Concrete failure scenario: user deletes a project quickly after launch;
+// the post-delete refresh removes it, then the slower startup enrichment
+// arrives and reinserts it. This test would fail on the pre-fix code.
+func TestEnrichment_OldResultIgnored(t *testing.T) {
+	bare := Item{Key: "alpha", Title: "alpha", Status: ""}
+	m := newTestModel(bare)
+	m.hideNewProject = true
+	m.refreshItems = func() ([]Item, error) { return nil, nil }
+
+	// Simulate two in-flight enrichments by calling startEnrich twice.
+	// After the second call m.enrichGen == 2.
+	_ = m.startEnrich() // gen=1 — slow startup enrichment
+	_ = m.startEnrich() // gen=2 — faster post-action refresh
+
+	// Deliver gen=1's result (stale — enrichGen is already 2).
+	staleItems := []Item{{Key: "alpha", Title: "alpha", Status: "stale-running"}}
+	updated, _ := m.Update(enrichedItemsMsg{items: staleItems, gen: 1})
+	mm := updated.(*model)
+
+	got := mm.list.Items()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(got))
+	}
+	it, ok := got[0].(Item)
+	if !ok {
+		t.Fatalf("expected Item, got %T", got[0])
+	}
+	if it.Status == "stale-running" {
+		t.Error("stale enrichment (gen=1) was applied even though enrichGen=2 — must be discarded")
+	}
+
+	// Now deliver gen=2's result (fresh) — must be applied.
+	freshItems := []Item{{Key: "alpha", Title: "alpha", Status: "running"}}
+	updated2, _ := mm.Update(enrichedItemsMsg{items: freshItems, gen: 2})
+	mm2 := updated2.(*model)
+
+	got2 := mm2.list.Items()
+	if len(got2) != 1 {
+		t.Fatalf("expected 1 item after fresh enrichment, got %d", len(got2))
+	}
+	it2, ok := got2[0].(Item)
+	if !ok {
+		t.Fatalf("expected Item, got %T", got2[0])
+	}
+	if it2.Status != "running" {
+		t.Errorf("fresh enrichment (gen=2) not applied: Status = %q, want %q", it2.Status, "running")
 	}
 }

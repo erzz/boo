@@ -553,7 +553,7 @@ func TestProjectPreviewer_UsesSavedLayoutOverTemplate(t *testing.T) {
 		t.Fatalf("SaveLayout: %v", err)
 	}
 
-	previewer := projectPreviewer(context.Background(), a)
+	previewer := projectPreviewer(context.Background(), a, pickerTheme(a))
 	got := previewer("proj")
 
 	if got == "" {

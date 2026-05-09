@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 
 	"github.com/erzz/boo/internal/layout"
@@ -69,7 +68,10 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 
 	// TUI path. Always show the picker — even with zero projects, the
 	// "+ New project" entry is visible and that's the user's next move.
-	items := buildPickerItems(ctx, a, reg.Projects)
+	// Initial items are built from registry data only (no Ghostty calls,
+	// no filesystem stats). Async enrichment via picker.Init fires the
+	// RefreshItems callback in the background and fills in Status/Trailing.
+	items := buildBareItems(reg.Projects)
 
 	// Pre-populate form defaults from cwd, so that hitting `n` from the
 	// list lands the user on a form that's ready to submit if they like
@@ -84,8 +86,8 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	// to a refreshed list rather than dropping them back to the shell.
 	// Each callback re-Loads the registry under the state lock to
 	// avoid racing with other shells.
-	onDelete := func(name string, purge bool) (string, error) {
-		var warn string
+	onDelete := func(name string, purge bool) ([]string, error) {
+		var warns []string
 		err := a.Paths.WithLock(func() error {
 			freshReg, err := project.Load(a.Paths)
 			if err != nil {
@@ -95,16 +97,14 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 			if err != nil {
 				return err
 			}
-			// We're inside the alt-screen, so executeDelete's success
-			// line would just flash and disappear. Send its output to
-			// io.Discard; the user sees the result via the refreshed
-			// list (project gone) instead.
-			var innerWarn string
-			innerWarn, err = executeDelete(ctx, a, freshReg, p, purge, io.Discard, io.Discard)
-			warn = innerWarn
-			return err
+			// We're inside the alt-screen — the picker owns presentation.
+			// executeDelete no longer writes anything; all non-fatal
+			// side-effect failures come back as []string warnings.
+			var innerErr error
+			warns, innerErr = executeDelete(ctx, a, freshReg, p, purge)
+			return innerErr
 		})
-		return warn, err
+		return warns, err
 	}
 	onSetLayout := func(name, template string) error {
 		return executeSetLayout(a, name, template)
@@ -158,18 +158,18 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	}
 
 	res, err := picker.Run(items, picker.Options{
-		Defaults:        defs,
-		PreviewTemplate: templatePreviewer(a),
-		PreviewProject:  projectPreviewer(ctx, a),
-		LayoutNames:     templateNames(a),
-		Theme:           a.Config.ThemeOr("default"),
-		ThemesDir:       a.Paths.ThemesDir,
-		ConfigPath:      a.Paths.ConfigFile,
-		OnDelete:        onDelete,
-		OnSetLayout:     onSetLayout,
-		OnEdit:          onEdit,
-		OnOpenLayout:    onOpenLayout,
-		RefreshItems:    refresh,
+		Defaults:              defs,
+		PreviewTemplate:       templatePreviewer(a),
+		PreviewProjectFactory: func(thm picker.Theme) func(string) string { return projectPreviewer(ctx, a, thm) },
+		LayoutNames:           templateNames(a),
+		Theme:                 a.Config.ThemeOr("default"),
+		ThemesDir:             a.Paths.ThemesDir,
+		ConfigPath:            a.Paths.ConfigFile,
+		OnDelete:              onDelete,
+		OnSetLayout:           onSetLayout,
+		OnEdit:                onEdit,
+		OnOpenLayout:          onOpenLayout,
+		RefreshItems:          refresh,
 	})
 	if err != nil {
 		return err
@@ -230,6 +230,27 @@ func buildPickerItems(ctx context.Context, a *app, projects []project.Project) [
 			Description: p.Dir,
 			Status:      status,
 			Trailing:    trailing,
+			Layout:      p.Layout,
+		})
+	}
+	return out
+}
+
+// buildBareItems builds a lightweight []picker.Item from registry data only
+// — no Ghostty calls, no filesystem stats. Status and Trailing are left
+// empty; they are filled in by async enrichment (picker.Init fires the
+// RefreshItems callback in the background).
+//
+// Used as the initial item set for the main TUI picker so picker.Run returns
+// immediately even with many projects. The fzf and delete-picker paths use
+// buildPickerItems directly since they need complete data up front.
+func buildBareItems(projects []project.Project) []picker.Item {
+	out := make([]picker.Item, 0, len(projects))
+	for _, p := range projects {
+		out = append(out, picker.Item{
+			Key:         p.Name,
+			Title:       p.Name,
+			Description: p.Dir,
 			Layout:      p.Layout,
 		})
 	}
@@ -356,10 +377,22 @@ func templateNames(a *app) []string {
 	return names
 }
 
+// pickerTheme resolves the active picker theme from the app's config.
+// On any error (unknown name, malformed file) it falls back to the default
+// theme silently — same behaviour as picker.Run's internal resolution.
+func pickerTheme(a *app) picker.Theme {
+	thm, _ := picker.ThemeByName(a.Paths.ThemesDir, a.Config.ThemeOr("default"))
+	return thm
+}
+
 // projectPreviewer returns a callback suitable for
 // picker.Options.PreviewProject. It renders a multi-line summary of one
 // project: name, dir, layout template, status, last-launched, and an
 // ASCII layout preview.
+//
+// thm is the active picker theme; its style slots replace the hard-coded
+// ANSI colours from earlier implementations so the preview stays legible
+// on both dark and light terminal backgrounds.
 //
 // The closure captures ctx + a (paths/ghostty) but **re-loads the
 // registry on every invocation**. This is intentional: in-loop actions
@@ -372,7 +405,7 @@ func templateNames(a *app) []string {
 // rightPaneInnerWidth (36) matches picker.rightPaneWidth (40) minus the
 // border (2) and padding (2). Hardcoded for now; if the right pane
 // becomes dynamic-width we'll thread the width through this callback.
-func projectPreviewer(ctx context.Context, a *app) func(string) string {
+func projectPreviewer(ctx context.Context, a *app, thm picker.Theme) func(string) string {
 	const rightPaneInnerWidth = 36
 	if ctx == nil {
 		ctx = context.Background()
@@ -404,18 +437,18 @@ func projectPreviewer(ctx context.Context, a *app) func(string) string {
 		}
 
 		var b strings.Builder
-		// Title row
-		b.WriteString(boldAccent(p.Name))
+		// Title row — use theme accent so it matches the list's selected-title.
+		b.WriteString(boldAccent(thm, p.Name))
 		b.WriteString("\n\n")
-		// Two-column key/value rows. Keys are faint; values plain.
+		// Two-column key/value rows. Keys are faint (theme); values plain.
 		// dir is shortened to fit the pane: $HOME → ~ first, then a
 		// head-ellipsis if it's still too long. The "dir  " prefix
 		// (faint key + 2 spaces) eats 5 cols, leaving rightPaneInnerWidth-5
 		// for the value itself.
-		writeRow(&b, "dir", shortenPath(p.Dir, rightPaneInnerWidth-5))
-		writeRow(&b, "layout", p.Layout)
-		writeRow(&b, "status", renderStatusFor(status))
-		writeRow(&b, "last", lastLaunched)
+		writeRow(&b, thm, "dir", shortenPath(p.Dir, rightPaneInnerWidth-5))
+		writeRow(&b, thm, "layout", p.Layout)
+		writeRow(&b, thm, "status", renderStatusFor(thm, status))
+		writeRow(&b, thm, "last", lastLaunched)
 
 		// Layout preview underneath.
 		// Prefer the saved snapshot (layout.yaml) which reflects any edits
@@ -431,11 +464,11 @@ func projectPreviewer(ctx context.Context, a *app) func(string) string {
 				rendered = layoutpreview.RenderLayout(r.Layout, rightPaneInnerWidth)
 			}
 		} else {
-			rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("✖ layout unreadable")
+			rendered = thm.StatusBroken.Render("✖ layout unreadable")
 		}
 		if rendered != "" {
 			b.WriteString("\n")
-			b.WriteString(faint("layout preview"))
+			b.WriteString(faint(thm, "layout preview"))
 			b.WriteString("\n")
 			b.WriteString(rendered)
 		}
@@ -444,34 +477,32 @@ func projectPreviewer(ctx context.Context, a *app) func(string) string {
 }
 
 // boldAccent / faint / writeRow / renderStatusFor are tiny rendering
-// helpers shared by projectPreviewer. Kept in this file rather than
-// pushed into picker so the picker package stays project-agnostic; the
-// styling is intentionally simple (lipgloss styles applied here, not
-// looked up from picker.Theme) to avoid coupling CLI render code to the
-// theme primitive's internals.
-func boldAccent(s string) string {
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13")).Render(s)
+// helpers shared by projectPreviewer. Each takes the active picker.Theme
+// so colours are derived from the theme rather than hard-coded ANSI values,
+// keeping the preview legible on both dark and light terminal backgrounds.
+func boldAccent(thm picker.Theme, s string) string {
+	return thm.RightPaneTitle.Render(s)
 }
 
-func faint(s string) string {
-	return lipgloss.NewStyle().Faint(true).Render(s)
+func faint(thm picker.Theme, s string) string {
+	return thm.RightPaneFaint.Render(s)
 }
 
-func writeRow(b *strings.Builder, k, v string) {
-	b.WriteString(faint(k))
+func writeRow(b *strings.Builder, thm picker.Theme, k, v string) {
+	b.WriteString(faint(thm, k))
 	b.WriteString("  ")
 	b.WriteString(v)
 	b.WriteString("\n")
 }
 
-func renderStatusFor(s string) string {
+func renderStatusFor(thm picker.Theme, s string) string {
 	switch s {
 	case "running":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Render("● running")
+		return thm.StatusRunning.Render("● running")
 	case "dir-missing":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render("✖ dir missing")
+		return thm.StatusBroken.Render("✖ dir missing")
 	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("○ " + s)
+		return thm.StatusStopped.Render("○ " + s)
 	}
 }
 

@@ -186,9 +186,14 @@ func TestEditIntent_DispatchesOnEditAndRefreshes(t *testing.T) {
 		return origItems, nil
 	}
 
-	m.runIntent(EditIntent{
+	_, cmd := m.runIntent(EditIntent{
 		OldName: "alpha", NewName: "beta", NewDir: "/tmp/b", NewTemplate: "triple",
 	})
+	// startEnrich() returns a tea.Cmd that calls RefreshItems asynchronously.
+	// Execute it manually here so the counter is visible synchronously in the test.
+	if cmd != nil {
+		cmd()
+	}
 
 	if len(*calls) != 1 || (*calls)[0] != "alpha→beta:/tmp/b:triple" {
 		t.Errorf("OnEdit calls = %v, want [alpha→beta:/tmp/b:triple]", *calls)

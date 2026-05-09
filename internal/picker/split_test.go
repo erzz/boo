@@ -66,10 +66,23 @@ func TestSplit_RightPaneUsesPreviewCallback(t *testing.T) {
 		return sentinel
 	}
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
-	v := updated.View()
+	mm := updated.(*model)
+
+	// The preview is now async: dispatch the cmd, execute it, and feed
+	// the resulting previewReadyMsg through Update so the cache is
+	// populated before we inspect View().
+	previewCmd := mm.startPreview()
+	if previewCmd == nil {
+		t.Fatal("startPreview must return a non-nil cmd when previewProject is set and an item is selected")
+	}
+	msg := previewCmd()
+	updated2, _ := mm.Update(msg)
+	mm2 := updated2.(*model)
+
 	if called != "alpha" {
 		t.Errorf("preview callback called with %q, want alpha", called)
 	}
+	v := mm2.View()
 	if !strings.Contains(v, sentinel) {
 		t.Errorf("right pane should contain preview output %q, got:\n%s", sentinel, v)
 	}

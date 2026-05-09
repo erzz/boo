@@ -53,7 +53,7 @@ func TestStatusBar_PurgeSuccessReflectsWindowClose(t *testing.T) {
 // bottom (rather than vanishing).
 func TestStatusBar_FailureSetsErrorStatus(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/x/alpha"})
-	m.onDelete = func(_ string, _ bool) (string, error) { return "", errFake }
+	m.onDelete = func(_ string, _ bool) ([]string, error) { return nil, errFake }
 	m.refreshItems = func() ([]Item, error) { return nil, nil }
 
 	m = pressKey(t, m, "d")
