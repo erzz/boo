@@ -154,8 +154,9 @@ func TestValidate_RejectsExcessiveDepth(t *testing.T) {
 // to the default — strict decoding surfaces the mistake immediately.
 func TestParse_UnknownFieldErrors(t *testing.T) {
 	cases := []struct {
-		name string
-		yaml string
+		name    string
+		yaml    string
+		wantKey string
 	}{
 		{
 			"unknown top-level field",
@@ -165,6 +166,7 @@ windws:
     split:
       cwd: .
 `,
+			"windws",
 		},
 		{
 			"unknown field inside split",
@@ -174,6 +176,7 @@ tabs:
     split:
       comand: nvim .
 `,
+			"comand",
 		},
 	}
 	for _, c := range cases {
@@ -181,6 +184,16 @@ tabs:
 			_, err := Parse([]byte(c.yaml))
 			if err == nil {
 				t.Fatalf("Parse(%q): expected error for unknown field, got nil", c.name)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "unknown field") {
+				t.Errorf("error should contain 'unknown field'; got: %v", err)
+			}
+			if !strings.Contains(msg, c.wantKey) {
+				t.Errorf("error should name offending key %q; got: %v", c.wantKey, err)
+			}
+			if !strings.Contains(msg, "layout: parse") {
+				t.Errorf("error should carry 'layout: parse' prefix; got: %v", err)
 			}
 		})
 	}

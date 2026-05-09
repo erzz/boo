@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -119,6 +120,16 @@ func TestLoad_UnknownFieldErrors(t *testing.T) {
 	_, _, err := Load(p)
 	if err == nil {
 		t.Fatal("expected error for unknown field 'defalt_layout', got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "unknown field") {
+		t.Errorf("error should mention 'unknown field'; got: %v", err)
+	}
+	if !strings.Contains(msg, "defalt_layout") {
+		t.Errorf("error should name the offending key 'defalt_layout'; got: %v", err)
+	}
+	if !strings.Contains(msg, "config: parse") {
+		t.Errorf("error should carry 'config: parse' prefix; got: %v", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package theme
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -244,7 +245,15 @@ colors:
 	if err := os.WriteFile(filepath.Join(dir, "oops.yaml"), typo, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Resolve(dir, "oops"); err == nil {
-		t.Error("Resolve should error on unknown field 'acent' (typo of 'accent'), got nil")
+	_, err := Resolve(dir, "oops")
+	if err == nil {
+		t.Fatal("Resolve should error on unknown field 'acent' (typo of 'accent'), got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "unknown field") {
+		t.Errorf("error should contain 'unknown field'; got: %v", err)
+	}
+	if !strings.Contains(msg, "acent") {
+		t.Errorf("error should name offending key 'acent'; got: %v", err)
 	}
 }
