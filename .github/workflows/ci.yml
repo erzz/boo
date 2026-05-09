@@ -18,3 +18,12 @@ jobs:
       - run: go vet ./...
       # Integration tests are not run in CI by default (require a running
       # Ghostty + Automation permission). Run locally with `make test-int`.
+
+  lint:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v6
