@@ -177,7 +177,7 @@ the built-in default.
 
 - macOS
 - [Ghostty](https://ghostty.org) 1.3+
-- Go 1.24+ (only to build from source)
+- Go 1.25+ (only to build from source)
 
 The first time boo controls Ghostty, macOS will prompt for **Automation** permission. `boo doctor`
 detects and surfaces the common setup issues (missing Ghostty, version mismatch, missing automation
