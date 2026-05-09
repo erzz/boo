@@ -9,6 +9,8 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
+
+	"github.com/erzz/boo/internal/state"
 )
 
 // newConfigCmd builds the `boo config` subcommand tree.
@@ -63,12 +65,15 @@ func newConfigPathCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "path",
 		Short: "Print the config file path",
+		// NOTE: deliberately does NOT call newApp() so that a malformed
+		// config file doesn't block the one command the user would run to
+		// find and fix it. Mirrors the pattern used by `boo doctor`.
 		RunE: func(c *cobra.Command, _ []string) error {
-			a, err := newApp()
+			p, err := state.Default()
 			if err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintln(c.OutOrStdout(), a.Paths.ConfigFile)
+			_, _ = fmt.Fprintln(c.OutOrStdout(), p.ConfigFile)
 			return nil
 		},
 	}
@@ -86,10 +91,19 @@ loads the file — if you save broken YAML, the next boo command will
 error.
 
 $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
+		// NOTE: deliberately does NOT call newApp() so that a malformed
+		// config file doesn't block the recovery command. Paths are
+		// resolved directly from state.Default(). Mirrors `boo doctor`.
 		RunE: func(c *cobra.Command, _ []string) error {
-			a, err := newApp()
+			p, err := state.Default()
 			if err != nil {
 				return err
+			}
+			// Ensure the config directory exists so the editor can open
+			// (or create) the file there. We only need ConfigDir, not
+			// the full EnsureDirs set.
+			if err := os.MkdirAll(p.ConfigDir, 0o755); err != nil {
+				return fmt.Errorf("create config dir %s: %w", p.ConfigDir, err)
 			}
 			editor := os.Getenv("EDITOR")
 			if editor == "" {
@@ -98,7 +112,7 @@ $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
 			if editor == "" {
 				return fmt.Errorf("set $EDITOR (or $VISUAL) to use 'boo config edit'")
 			}
-			path := a.Paths.ConfigFile
+			path := p.ConfigFile
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				if err := os.WriteFile(path, nil, 0o644); err != nil {
 					return fmt.Errorf("create %s: %w", path, err)
