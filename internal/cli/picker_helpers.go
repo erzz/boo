@@ -164,6 +164,8 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		PreviewProject:  projectPreviewer(ctx, a),
 		LayoutNames:     templateNames(a),
 		Theme:           a.Config.ThemeOr("default"),
+		ThemesDir:       a.Paths.ThemesDir,
+		ConfigPath:      a.Paths.ConfigFile,
 		OnDelete:        onDelete,
 		OnSetLayout:     onSetLayout,
 		OnEdit:          onEdit,

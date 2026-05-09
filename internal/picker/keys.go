@@ -33,6 +33,9 @@ type keyMap struct {
 	Purge      key.Binding // D — same as Delete but with Purge:true (close window too)
 	SetLayout  key.Binding // l — open layout cycler sub-screen, emit SetLayoutIntent
 
+	// List screen — global UI controls.
+	CycleTheme key.Binding // T — cycle to the next available theme and persist
+
 	// Confirm modal.
 	ConfirmYes key.Binding // y, enter
 	ConfirmNo  key.Binding // n, esc
@@ -79,6 +82,10 @@ func defaultKeyMap() keyMap {
 		SetLayout: key.NewBinding(
 			key.WithKeys("l"),
 			key.WithHelp("l", "set layout"),
+		),
+		CycleTheme: key.NewBinding(
+			key.WithKeys("T"),
+			key.WithHelp("T", "cycle theme"),
 		),
 		ConfirmYes: key.NewBinding(
 			key.WithKeys("y", "enter"),

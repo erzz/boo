@@ -1,0 +1,14 @@
+# Solarized Light — Ethan Schoonover's canonical light palette.
+#
+# https://ethanschoonover.com/solarized/. Tuned for light terminal
+# backgrounds (base3 / base2). The accent stays blue but borders and
+# muted text shift darker so they remain readable against light bases.
+name: solarized-light
+description: Solarized Light — for light terminal backgrounds.
+colors:
+  accent: "#268bd2"   # blue
+  info: "#2aa198"     # cyan
+  border: "#93a1a1"   # base1
+  ok: "#859900"       # green
+  warn: "#dc322f"     # red
+  stopped: "#93a1a1"  # base1

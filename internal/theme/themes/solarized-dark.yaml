@@ -1,0 +1,14 @@
+# Solarized Dark — Ethan Schoonover's canonical dark palette.
+#
+# https://ethanschoonover.com/solarized/. Uses Solarized's accent colours
+# against the standard dark base (base03 background assumed). Pairs
+# naturally with the Solarized Dark Ghostty colour scheme.
+name: solarized-dark
+description: Solarized Dark — Ethan Schoonover's canonical palette.
+colors:
+  accent: "#268bd2"   # blue
+  info: "#2aa198"     # cyan
+  border: "#586e75"   # base01
+  ok: "#859900"       # green
+  warn: "#dc322f"     # red
+  stopped: "#586e75"  # base01

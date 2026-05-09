@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -12,6 +14,7 @@ import (
 	booexec "github.com/erzz/boo/internal/exec"
 	"github.com/erzz/boo/internal/ghostty"
 	"github.com/erzz/boo/internal/state"
+	"github.com/erzz/boo/internal/theme"
 )
 
 func newDoctorCmd() *cobra.Command {
@@ -38,6 +41,7 @@ func newDoctorCmd() *cobra.Command {
 					_, _, err := config.Load(path)
 					return err
 				}),
+				doctor.ThemesCheck(paths.ThemesDir, validateUserThemes),
 			)
 			results, worst := doctor.Run(ctx, checks)
 			renderResults(cmd.OutOrStdout(), results)
@@ -47,6 +51,36 @@ func newDoctorCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// validateUserThemes returns the names of user theme files in dir
+// that fail to parse. Built-ins are skipped — they're embedded and
+// validated at build time. We intentionally don't surface the full
+// parse error here; `boo themes` already does that. Doctor just
+// flags that something is broken so the user knows to look.
+func validateUserThemes(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var broken []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".yaml") {
+			continue
+		}
+		stem := strings.TrimSuffix(name, ".yaml")
+		// Resolve via the package so we exercise the same code
+		// path the picker uses. The validation is just "does
+		// Resolve return an error?" — simple and honest.
+		if _, err := theme.Resolve(dir, stem); err != nil {
+			broken = append(broken, stem)
+		}
+	}
+	return broken, nil
 }
 
 func renderResults(w io.Writer, results []doctor.Result) {

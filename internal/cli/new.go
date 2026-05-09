@@ -86,6 +86,8 @@ flags act as form pre-population and the user can edit before submitting.`,
 				PreviewTemplate:          templatePreviewer(a),
 				LayoutNames:              templateNames(a),
 				Theme:                    a.Config.ThemeOr("default"),
+				ThemesDir:                a.Paths.ThemesDir,
+				ConfigPath:               a.Paths.ConfigFile,
 			})
 			if err != nil {
 				return err

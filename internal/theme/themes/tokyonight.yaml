@@ -1,0 +1,14 @@
+# Tokyo Night — Storm variant.
+#
+# Inspired by https://github.com/folke/tokyonight.nvim. Cool blue-purple
+# accent on a dark background. Plays well with the popular Tokyo Night
+# Ghostty colour scheme.
+name: tokyonight
+description: Tokyo Night Storm — cool blue-purple on dark.
+colors:
+  accent: "#bb9af7"   # purple
+  info: "#7aa2f7"     # blue
+  border: "#7aa2f7"   # blue
+  ok: "#9ece6a"       # green
+  warn: "#f7768e"     # red
+  stopped: "#565f89"  # comment

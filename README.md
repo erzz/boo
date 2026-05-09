@@ -91,6 +91,7 @@ boo show projA       # everything boo knows about a project
 boo edit projA       # open a project's layout file in $EDITOR
 boo set-layout projA triple   # switch a project to a different layout template
 boo layouts          # preview every available layout template
+boo themes           # list available visual themes
 boo delete projA     # remove a project (--purge to also close its window)
 boo config           # inspect / edit global config
 boo doctor           # sanity-check your environment
@@ -160,6 +161,17 @@ A layout is a tree of windows → tabs → splits. Each leaf can specify:
 Global config lives at `~/.config/boo/config.yaml`. See [`docs/config.md`](./docs/config.md) for the
 schema. `boo config` prints the effective config plus where each value came from; `boo config edit`
 opens it in `$EDITOR`.
+
+## Themes
+
+The TUI ships with five built-in themes (`default`, `tokyonight`, `solarized-dark`,
+`solarized-light`, `light`) and supports user-authored themes dropped into
+`~/.config/boo/themes/`. A theme only colours boo's own UI (borders, accents, status pills) —
+your terminal background and ANSI palette stay under Ghostty's control, so pick a boo theme that
+coordinates with your Ghostty colour scheme. Activate one with `ui.theme: <name>` in your config.
+See [`docs/themes.md`](./docs/themes.md) for the schema, slot reference, and worked examples
+(Catppuccin, Gruvbox, monochrome). Run `boo themes init <name>` to scaffold a starter file from
+the built-in default.
 
 ## Requirements
 

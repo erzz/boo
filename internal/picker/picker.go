@@ -16,6 +16,9 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/erzz/boo/internal/config"
+	"github.com/erzz/boo/internal/theme"
 )
 
 // Item is one row in the picker.
@@ -151,6 +154,17 @@ type Options struct {
 	// back to the built-in default. The CLI populates this from the
 	// `ui.theme` config key.
 	Theme string
+	// ThemesDir is the directory holding user-authored theme YAML
+	// files (typically ~/.config/boo/themes). Empty means "built-ins
+	// only" — useful in tests and when boo runs on a clean machine.
+	ThemesDir string
+	// ConfigPath is the path to the user's config.yaml. When set, the
+	// picker's `T` keybind cycles through available themes and
+	// persists the choice by rewriting this file. Empty disables the
+	// keybind (the picker still respects Theme for the session, but
+	// can't save changes — used in tests and any future read-only
+	// caller).
+	ConfigPath string
 	// PreviewProject, if set, is called whenever the cursor moves to a
 	// project row in the list; the returned multi-line string is shown
 	// in the right-hand split pane. Empty return = render a default
@@ -208,7 +222,7 @@ type Options struct {
 // Renders to stderr so command output redirected via stdout doesn't get
 // mangled and the alt-screen restore at exit is clean.
 func Run(items []Item, opts Options) (Result, error) {
-	theme, _ := ThemeByName(opts.Theme)
+	theme, _ := ThemeByName(opts.ThemesDir, opts.Theme)
 
 	listItems := make([]list.Item, 0, len(items)+1)
 	for _, it := range items {
@@ -252,6 +266,9 @@ func Run(items []Item, opts Options) (Result, error) {
 		if opts.OnDelete != nil {
 			out = append(out, keys.Delete, keys.Purge)
 		}
+		if opts.ConfigPath != "" {
+			out = append(out, keys.CycleTheme)
+		}
 		return out
 	}
 	l.AdditionalShortHelpKeys = helpExtras
@@ -270,6 +287,9 @@ func Run(items []Item, opts Options) (Result, error) {
 		theme:               theme,
 		keys:                keys,
 		screen:              scr,
+		themeName:           opts.Theme,
+		themesDir:           opts.ThemesDir,
+		configPath:          opts.ConfigPath,
 		formOnly:            formOnly,
 		hideNewProject:      opts.HideNewProject,
 		alreadyRegisteredAs: opts.Defaults.AlreadyRegisteredAs,
@@ -335,6 +355,14 @@ type model struct {
 	theme  Theme
 	keys   keyMap
 	screen screen
+
+	// Theme cycler state. themeName tracks the active theme so `T`
+	// knows where in the cycle to advance from. themesDir + configPath
+	// let cycleTheme reload the theme list and persist the choice;
+	// when configPath is empty the keybind is a no-op.
+	themeName  string
+	themesDir  string
+	configPath string
 
 	formOnly            bool   // when true, esc on form cancels the whole TUI rather than going back to the list
 	hideNewProject      bool   // when true, the form/intent path is unreachable; selection-only mode
@@ -620,6 +648,9 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 				}
+			case matches(m.keys.CycleTheme, pressed):
+				m.cycleTheme()
+				return m, nil
 			case matches(m.keys.Select, pressed):
 				switch v := m.list.SelectedItem().(type) {
 				case Item:
@@ -853,6 +884,76 @@ func (m *model) setStatusOK(msg string) {
 // Wraps showError's message in red.
 func (m *model) setStatusErr(msg string) {
 	m.status = statusLine{text: msg, isErr: true}
+}
+
+// cycleTheme advances to the next available theme (built-in + user)
+// in alphabetical order, applies it live to every visible surface
+// (list delegate, list title, form), and persists the choice to
+// config.yaml. Failures fall into the status bar; the cycle still
+// advances so the user can keep trying.
+//
+// No-ops gracefully when configPath is empty (read-only callers) or
+// when theme.List returns nothing (impossible in production — the
+// built-in default is always present — but guarded so a packaging
+// bug doesn't crash the TUI).
+func (m *model) cycleTheme() {
+	names, err := theme.List(m.themesDir)
+	if err != nil || len(names) == 0 {
+		m.setStatusErr(fmt.Sprintf("themes: %v", err))
+		return
+	}
+
+	// Find current position; default to -1 so an unknown current
+	// name (theme deleted from disk between launches) advances to
+	// names[0] rather than wrapping past the end.
+	idx := -1
+	for i, n := range names {
+		if n == m.themeName {
+			idx = i
+			break
+		}
+	}
+	next := names[(idx+1)%len(names)]
+
+	t, ok := ThemeByName(m.themesDir, next)
+	if !ok {
+		// theme.List returned a name that ThemeByName couldn't load.
+		// Skip it and report — the user can keep cycling past it.
+		m.setStatusErr(fmt.Sprintf("theme %q failed to load", next))
+		return
+	}
+
+	m.applyTheme(next, t)
+
+	if m.configPath == "" {
+		// Session-only mode (no persistence wired). Still useful for
+		// test harnesses; just don't claim we saved.
+		m.setStatusOK(fmt.Sprintf("theme: %s", next))
+		return
+	}
+
+	if err := config.SetUITheme(m.configPath, next); err != nil {
+		m.setStatusErr(fmt.Sprintf("theme: %s (save failed: %v)", next, err))
+		return
+	}
+	m.setStatusOK(fmt.Sprintf("theme: %s (saved)", next))
+}
+
+// applyTheme swaps the live theme on every surface that caches
+// lipgloss styles. Centralised here so future theme-mutating paths
+// (e.g. a `boo themes pick` modal) reuse the same propagation rules
+// and don't leave half the UI rendering in the old palette.
+func (m *model) applyTheme(name string, t Theme) {
+	m.theme = t
+	m.themeName = name
+
+	// Rebuild the list delegate so row styles (selected title, dim
+	// description, etc.) pick up the new palette.
+	m.list.SetDelegate(newDelegate(t))
+	m.list.Styles.Title = t.ListTitle
+
+	// The form caches its own theme — propagate.
+	m.form.theme = t
 }
 
 // updateError dismisses the error screen on any keypress and returns to

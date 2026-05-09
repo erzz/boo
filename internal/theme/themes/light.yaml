@@ -1,0 +1,15 @@
+# boo's brand-purple palette tuned for light terminal backgrounds.
+#
+# Same Ghostty-purple identity as the default theme, but darker tones
+# and a darker border so everything stays readable on a light base.
+# Use this with light Ghostty colour schemes (e.g. Catppuccin Latte,
+# GitHub Light, Solarized Light bases).
+name: light
+description: Ghostty purple, tuned for light terminal backgrounds.
+colors:
+  accent: "#5B5BD6"   # Ghostty brand purple — strong on light
+  info: "#3F3F8F"     # darker brand purple
+  border: "#9E9EBF"   # muted purple-grey
+  ok: "#1F8F4C"       # darker green for contrast on light
+  warn: "#C53030"     # darker red for contrast on light
+  stopped: "#6B7280"  # neutral grey

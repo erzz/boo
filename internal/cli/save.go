@@ -114,6 +114,8 @@ still printed to stderr under --force so audit logs show what was lost.`,
 						PreviewTemplate:          templatePreviewer(a),
 						LayoutNames:              templateNames(a),
 						Theme:                    a.Config.ThemeOr("default"),
+						ThemesDir:                a.Paths.ThemesDir,
+						ConfigPath:               a.Paths.ConfigFile,
 					})
 					if err != nil {
 						return err

@@ -135,6 +135,8 @@ func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 		HideNewProject: true,
 		PreviewProject: projectPreviewer(ctx, a),
 		Theme:          a.Config.ThemeOr("default"),
+		ThemesDir:      a.Paths.ThemesDir,
+		ConfigPath:     a.Paths.ConfigFile,
 	})
 	if err != nil {
 		return "", err

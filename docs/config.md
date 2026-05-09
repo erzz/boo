@@ -34,8 +34,10 @@ git:
   default_remote: https://github.com/erzz
 
 ui:
-  # Reserved. No behaviour wired yet — placeholder for an upcoming
-  # theming pass.
+  # Named visual theme for the TUI. Built-in: "default" (Ghostty
+  # palette). User themes live in ~/.config/boo/themes/<name>.yaml
+  # and shadow built-ins of the same name. See docs/themes.md for
+  # the schema and `boo themes` to list what's available.
   # Factory default: default
   theme: default
 ```

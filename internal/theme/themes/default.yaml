@@ -1,0 +1,20 @@
+# Default theme — Ghostty brand palette.
+#
+# A lifted purple accent for selection and titles, the canonical Ghostty
+# purple for the "+ New project" entry point and pane borders, plus stock
+# ANSI status colours that survive any terminal theme.
+name: default
+description: Ghostty purple, brand-aligned palette.
+colors:
+  # Selection, focus, list/form titles, right-pane title, the cursor.
+  accent: "#A594FF"
+  # "+ New project" row, prompts, brand-coloured highlights.
+  info: "#5B5BD6"
+  # Pane borders (left list pane and right preview pane).
+  border: "#5B5BD6"
+  # "● running" project status pill.
+  ok: "10"
+  # Errors, "✖ dir missing", form validation failures.
+  warn: "9"
+  # "○ stopped" project status pill, neutral foreground.
+  stopped: "8"

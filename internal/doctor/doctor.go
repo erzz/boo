@@ -103,6 +103,48 @@ func ConfigCheck(path string, load func(path string) error) CheckFunc {
 	}
 }
 
+// ThemesCheck reports whether each user theme in themesDir parses
+// cleanly. Themes are cosmetic, so broken themes are WARN rather than
+// FAIL — boo still launches, falling back to the default theme.
+//
+// Like ConfigCheck, this is wired separately so the doctor package
+// stays free of an internal/theme dependency. The CLI passes in a
+// list-and-validate function.
+//
+//   - themesDir doesn't exist → SKIP ("no user themes").
+//   - All user themes parse → OK.
+//   - One or more themes fail to parse → WARN with the first error
+//     surfaced; `boo themes` shows the full list inline with [error].
+func ThemesCheck(themesDir string, validate func(dir string) (broken []string, err error)) CheckFunc {
+	return func(_ context.Context, _ []Result) Result {
+		if _, err := os.Stat(themesDir); os.IsNotExist(err) {
+			return Result{
+				Name:   "themes",
+				Status: Skip,
+				Detail: "no user themes — using built-ins",
+			}
+		}
+		broken, err := validate(themesDir)
+		if err != nil {
+			return Result{
+				Name:   "themes",
+				Status: Warn,
+				Detail: "could not list user themes: " + err.Error(),
+				Hint:   "run 'boo themes' to inspect",
+			}
+		}
+		if len(broken) == 0 {
+			return Result{Name: "themes", Status: OK, Detail: themesDir}
+		}
+		return Result{
+			Name:   "themes",
+			Status: Warn,
+			Detail: fmt.Sprintf("%d broken theme(s): %s", len(broken), strings.Join(broken, ", ")),
+			Hint:   "run 'boo themes' to see the parse errors; the picker falls back to the default theme",
+		}
+	}
+}
+
 // Run executes all checks in order and returns the results plus the worst
 // non-Skip status.
 func Run(ctx context.Context, checks []CheckFunc) ([]Result, Status) {

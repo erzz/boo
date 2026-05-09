@@ -4,7 +4,7 @@ import "testing"
 
 func TestThemeByName_DefaultAndEmpty(t *testing.T) {
 	for _, name := range []string{"", "default"} {
-		_, ok := ThemeByName(name)
+		_, ok := ThemeByName("", name)
 		if !ok {
 			t.Errorf("ThemeByName(%q) ok=false, want true", name)
 		}
@@ -12,7 +12,7 @@ func TestThemeByName_DefaultAndEmpty(t *testing.T) {
 }
 
 func TestThemeByName_UnknownFallsBackSilently(t *testing.T) {
-	theme, ok := ThemeByName("solarized-dark")
+	theme, ok := ThemeByName("", "no-such-theme-xyz")
 	if ok {
 		t.Error("ThemeByName for unknown theme returned ok=true")
 	}

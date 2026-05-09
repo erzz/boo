@@ -1,6 +1,10 @@
 package picker
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+
+	booth "github.com/erzz/boo/internal/theme"
+)
 
 // Theme is the resolved set of styles the picker uses to render itself.
 //
@@ -70,17 +74,18 @@ type Theme struct {
 	StatusBarFaint lipgloss.Style // idle / no-action-yet hint text
 }
 
-// defaultTheme is the only built-in theme today. The palette and weights
-// match the original module-level styles exactly so Phase 1 is a pure
-// refactor — no visible change.
-func defaultTheme() Theme {
-	const (
-		accent  = lipgloss.Color("13") // magenta — selection / focus
-		info    = lipgloss.Color("12") // blue — "+ New project"
-		ok      = lipgloss.Color("10") // green — running
-		warn    = lipgloss.Color("9")  // red — broken / errors
-		stopped = lipgloss.Color("8")  // grey — stopped
-	)
+// buildTheme materialises the lipgloss styles for a palette. This is
+// the one place we map the data model (theme.Theme) to renderable
+// lipgloss styles. Adding a new colour slot to the palette means
+// adding one line here and one in defaultTheme YAML — nothing else.
+func buildTheme(p booth.Theme) Theme {
+	accent := lipgloss.Color(p.Colors.Accent)
+	info := lipgloss.Color(p.Colors.Info)
+	border := lipgloss.Color(p.Colors.Border)
+	ok := lipgloss.Color(p.Colors.OK)
+	warn := lipgloss.Color(p.Colors.Warn)
+	stopped := lipgloss.Color(p.Colors.Stopped)
+
 	bold := lipgloss.NewStyle().Bold(true)
 	faint := lipgloss.NewStyle().Faint(true)
 
@@ -116,7 +121,7 @@ func defaultTheme() Theme {
 
 		RightPaneBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(stopped).
+			BorderForeground(border).
 			Padding(0, 1),
 		RightPaneTitle: bold.Foreground(accent),
 		RightPaneLabel: faint,
@@ -125,7 +130,7 @@ func defaultTheme() Theme {
 
 		ListPaneBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(stopped).
+			BorderForeground(border).
 			Padding(0, 1),
 
 		StatusBar:      lipgloss.NewStyle().Foreground(ok),
@@ -134,16 +139,33 @@ func defaultTheme() Theme {
 	}
 }
 
-// ThemeByName resolves a theme name to a Theme. Unknown names fall back
-// to the default theme silently — themes are cosmetic, not functional, so
-// a typo in config shouldn't break the picker. Callers that care about
-// validation can compare the returned theme against defaultTheme() or
-// inspect the bool.
-func ThemeByName(name string) (Theme, bool) {
-	switch name {
-	case "", "default":
-		return defaultTheme(), true
-	default:
+// defaultTheme returns the lipgloss styles built from the embedded
+// `default` theme. Used as the safe fallback when ThemeByName can't
+// resolve a user-requested theme.
+func defaultTheme() Theme {
+	return buildTheme(booth.MustDefault())
+}
+
+// ThemeByName resolves a theme name to a styled Theme. Loading order:
+//
+//  1. User theme at themesDir/<name>.yaml (if themesDir != "").
+//  2. Built-in theme embedded in the binary.
+//  3. Built-in `default` theme as ultimate fallback.
+//
+// On any error (unknown name, malformed file, IO failure) it falls
+// back to the default theme silently and returns ok=false. Themes are
+// cosmetic, not functional — a typo in `ui.theme` shouldn't prevent
+// the picker from launching. Callers that care about the failure
+// (notably `boo doctor`) should resolve the theme themselves via the
+// `internal/theme` package and inspect the error.
+//
+// themesDir may be empty, which restricts resolution to built-ins.
+// This matches what tests want and avoids forcing every caller to
+// thread the path through.
+func ThemeByName(themesDir, name string) (Theme, bool) {
+	r, err := booth.Resolve(themesDir, name)
+	if err != nil {
 		return defaultTheme(), false
 	}
+	return buildTheme(r.Theme), true
 }

@@ -7,6 +7,7 @@
 //	$XDG_CONFIG_HOME/boo/   (default ~/.config/boo)
 //	  config.yaml           — global config
 //	  layouts/*.yaml        — user-defined shared layout templates
+//	  themes/*.yaml         — user-defined visual themes
 //
 //	$XDG_DATA_HOME/boo/     (default ~/.local/share/boo)
 //	  projects.toml         — registry index
@@ -27,6 +28,7 @@ type Paths struct {
 	DataDir     string // ~/.local/share/boo
 	ConfigFile  string // ConfigDir/config.yaml
 	LayoutsDir  string // ConfigDir/layouts
+	ThemesDir   string // ConfigDir/themes
 	Registry    string // DataDir/projects.toml
 	ProjectsDir string // DataDir/projects
 }
@@ -68,6 +70,7 @@ func forBase(configDir, dataDir string) Paths {
 		DataDir:     dataDir,
 		ConfigFile:  filepath.Join(configDir, "config.yaml"),
 		LayoutsDir:  filepath.Join(configDir, "layouts"),
+		ThemesDir:   filepath.Join(configDir, "themes"),
 		Registry:    filepath.Join(dataDir, "projects.toml"),
 		ProjectsDir: filepath.Join(dataDir, "projects"),
 	}
