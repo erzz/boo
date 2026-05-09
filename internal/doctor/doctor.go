@@ -379,7 +379,7 @@ func isGhosttyNotRunning(msg string) bool {
 }
 
 // checkFzfOptional reports whether fzf is available. fzf is optional —
-// `boo pick` works fine without it — so a missing fzf is Skip, not Warn.
+// boo works fine without it — so a missing fzf is Skip, not Warn.
 func checkFzfOptional(_ context.Context, _ []Result) Result {
 	if path, err := exec.LookPath("fzf"); err == nil {
 		return Result{Name: "fzf (optional)", Status: OK, Detail: path}
@@ -388,7 +388,7 @@ func checkFzfOptional(_ context.Context, _ []Result) Result {
 		Name:   "fzf (optional)",
 		Status: Skip,
 		Detail: "fzf not found on PATH",
-		Hint:   "Install fzf to use 'boo pick --fzf'. The built-in picker works without it.",
+		Hint:   "Install fzf to use 'boo fzf'. The built-in TUI picker works without it.",
 	}
 }
 

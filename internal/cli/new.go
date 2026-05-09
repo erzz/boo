@@ -120,7 +120,7 @@ flags act as form pre-population and the user can edit before submitting.`,
 	cmd.Flags().StringVar(&fromURL, "from", "", "git URL to clone from")
 	cmd.Flags().StringVar(&intoDir, "into", "", "directory to clone into (with --from); defaults to repo name in cwd")
 	cmd.Flags().StringVar(&existing, "dir", "", "existing directory to register")
-	cmd.Flags().StringVar(&layoutName, "layout", "", "layout template to use (default: 'triple')")
+	cmd.Flags().StringVar(&layoutName, "layout", "", "layout template name (uses configured default if omitted)")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the form and register immediately (uses cwd if --dir/--from omitted)")
 	return cmd
 }
