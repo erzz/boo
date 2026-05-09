@@ -56,8 +56,8 @@ func defaultKeyMap() keyMap {
 			key.WithHelp("enter", "select"),
 		),
 		Quit: key.NewBinding(
-			key.WithKeys("q", "ctrl+c", "esc"),
-			key.WithHelp("q", "quit"),
+			key.WithKeys("q", "ctrl+c"),
+			key.WithHelp("q / ctrl-c", "quit"),
 		),
 		New: key.NewBinding(
 			key.WithKeys("n", "+"),

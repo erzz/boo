@@ -72,11 +72,18 @@ func TestModel_QCancels(t *testing.T) {
 	}
 }
 
-func TestModel_EscCancels(t *testing.T) {
+func TestModel_EscNoOpOnMainList(t *testing.T) {
+	// esc was removed from the Quit binding (Fix 2). On the main list
+	// screen pressing esc should be a no-op — neither cancelling the
+	// picker nor setting any intent.
 	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
 	updated, _ := m.Update(keyMsg("esc"))
-	if !updated.(*model).cancelled {
-		t.Fatal("expected cancelled")
+	mm := updated.(*model)
+	if mm.cancelled {
+		t.Fatal("esc must not cancel on the main list screen (Fix 2: only q / ctrl-c quit)")
+	}
+	if mm.intent != nil {
+		t.Fatalf("esc must not set an intent on the main list screen, got %#v", mm.intent)
 	}
 }
 

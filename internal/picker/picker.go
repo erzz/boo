@@ -241,6 +241,22 @@ type Options struct {
 	// transitions to the empty-state view. nil callback = the picker
 	// leaves the existing list in place (stale data until exit).
 	RefreshItems func() ([]Item, error)
+
+	// OnLaunch, if set, is invoked when the user selects a project to
+	// launch. The returned tea.Cmd runs asynchronously while the picker
+	// stays alive; on completion the Cmd must emit a LaunchFinishedMsg
+	// so the picker can update the status bar and re-enrich the list.
+	//
+	// When OnLaunch is nil the picker falls back to legacy behaviour:
+	// emit tea.Quit and return a SwitchIntent via Result. Selection-only
+	// callers (delete picker, save/new form flows) leave this nil.
+	OnLaunch func(name string) tea.Cmd
+
+	// StartupWarning, if non-empty, is shown in the status bar when
+	// the picker first opens. Used to surface non-fatal startup issues
+	// such as a configured theme failing to load. The warning persists
+	// until the user takes any action that replaces the status.
+	StartupWarning string
 }
 
 // Run shows the TUI and blocks until the user makes a decision.
@@ -335,7 +351,11 @@ func Run(items []Item, opts Options) (Result, error) {
 		onSetLayout:           opts.OnSetLayout,
 		onEdit:                opts.OnEdit,
 		onOpenLayout:          opts.OnOpenLayout,
+		onLaunch:              opts.OnLaunch,
 		refreshItems:          opts.RefreshItems,
+	}
+	if opts.StartupWarning != "" {
+		m.status = statusLine{text: opts.StartupWarning, isErr: true}
 	}
 	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(stderr()))
 	final, err := prog.Run()
@@ -433,6 +453,7 @@ type model struct {
 	onSetLayout  func(name, template string) error
 	onEdit       func(oldName, newName, newDir, newTemplate string) error
 	onOpenLayout func(name string) tea.Cmd
+	onLaunch     func(name string) tea.Cmd
 	refreshItems func() ([]Item, error)
 
 	intent    Intent // nil + cancelled=false should not happen; nil + cancelled=true means dismissed
@@ -546,6 +567,27 @@ type editorFinishedMsg struct {
 // the unexported type name.
 func NewEditorFinishedMsg(err error) tea.Msg {
 	return editorFinishedMsg{err: err}
+}
+
+// launchFinishedMsg is dispatched by the tea.Cmd returned from an
+// OnLaunch callback when the launch attempt completes (success or
+// failure). The picker handles it in Update by updating the status bar
+// and triggering a re-enrichment so the newly-launched project's status
+// pill refreshes.
+type launchFinishedMsg struct {
+	name string
+	err  error
+}
+
+// LaunchFinishedMsg is the exported type alias for launchFinishedMsg.
+// CLI-side OnLaunch callbacks use NewLaunchFinishedMsg to return the
+// right message type without depending on the unexported name.
+type LaunchFinishedMsg = launchFinishedMsg
+
+// NewLaunchFinishedMsg constructs a launchFinishedMsg for the named
+// project. Pass nil err on success, non-nil on failure.
+func NewLaunchFinishedMsg(name string, err error) tea.Msg {
+	return launchFinishedMsg{name: name, err: err}
 }
 
 // brandStripActive reports whether the list pane is large enough to
@@ -739,6 +781,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startPreview()
 	}
 
+	// launchFinishedMsg is dispatched by the tea.Cmd returned from an
+	// OnLaunch callback. Update the status bar and trigger a fresh
+	// enrichment so the newly-launched project's status pill reflects
+	// its running state.
+	if lm, ok := msg.(launchFinishedMsg); ok {
+		if lm.err != nil {
+			m.setStatusErr(fmt.Sprintf("launch failed: %v", lm.err))
+		} else {
+			m.setStatusOK(fmt.Sprintf("launched %s", lm.name))
+		}
+		return m, m.startEnrich()
+	}
+
 	switch m.screen {
 	case screenAlreadyRegistered:
 		return m.updateAlreadyRegistered(msg)
@@ -822,11 +877,21 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case matches(m.keys.CycleTheme, pressed):
 			return m, m.cycleTheme()
 		case matches(m.keys.Select, pressed):
-				switch v := m.list.SelectedItem().(type) {
-				case Item:
-					m.intent = SwitchIntent{Name: v.Key}
-					return m, tea.Quit
-				case newProjectItem:
+			switch v := m.list.SelectedItem().(type) {
+			case Item:
+				if m.onLaunch != nil {
+					// Stay-alive launch path: the picker remains open
+					// while the project window opens or switches focus.
+					// Status updates keep the user informed; a fresh
+					// enrichment fires on completion so the status pill
+					// reflects the new running state.
+					m.status = statusLine{text: fmt.Sprintf("launching %s…", v.Key)}
+					return m, m.onLaunch(v.Key)
+				}
+				// Legacy quit-and-handoff path (selection-only callers).
+				m.intent = SwitchIntent{Name: v.Key}
+				return m, tea.Quit
+			case newProjectItem:
 					if m.hideNewProject {
 						break
 					}
@@ -1247,7 +1312,11 @@ func (m *model) updateAlreadyRegistered(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case matches(m.keys.Switch, pressed):
 			m.screen = screenForm
 			return m, nil
-		case matches(m.keys.Quit, pressed):
+		case matches(m.keys.Quit, pressed), matches(m.keys.Cancel, pressed):
+			// Quit (q / ctrl+c) and Cancel (esc) both dismiss this
+			// sub-screen. Cancel was previously handled via Quit when esc
+			// was bound there; now that esc is removed from Quit we check
+			// Cancel explicitly so sub-screen dismissal keeps working.
 			m.cancelled = true
 			return m, tea.Quit
 		}

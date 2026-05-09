@@ -157,18 +157,48 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		return buildPickerItems(ctx, a, freshReg.Projects), nil
 	}
 
+	// onLaunch runs the project launch in a background tea.Cmd so the
+	// picker stays alive while the Ghostty window opens or switches
+	// focus. The cmd emits a LaunchFinishedMsg when done so the picker
+	// can update its status bar and re-enrich items.
+	onLaunch := func(name string) tea.Cmd {
+		return func() tea.Msg {
+			freshReg, err := project.Load(a.Paths)
+			if err != nil {
+				return picker.NewLaunchFinishedMsg(name, err)
+			}
+			p, err := freshReg.Get(name)
+			if err != nil {
+				return picker.NewLaunchFinishedMsg(name, err)
+			}
+			return picker.NewLaunchFinishedMsg(name, switchToProject(ctx, a, p))
+		}
+	}
+
+	// Check whether the configured theme loaded successfully. If not,
+	// surface a startup warning so the user knows the picker fell back
+	// to the default theme — without this the fallback is invisible.
+	themeName := a.Config.ThemeOr("default")
+	_, themeOK := picker.ThemeByName(a.Paths.ThemesDir, themeName)
+	var startupWarning string
+	if !themeOK {
+		startupWarning = fmt.Sprintf("theme %q not found, using default", themeName)
+	}
+
 	res, err := picker.Run(items, picker.Options{
 		Defaults:              defs,
 		PreviewTemplate:       templatePreviewer(a),
 		PreviewProjectFactory: func(thm picker.Theme) func(string) string { return projectPreviewer(ctx, a, thm) },
 		LayoutNames:           templateNames(a),
-		Theme:                 a.Config.ThemeOr("default"),
+		Theme:                 themeName,
 		ThemesDir:             a.Paths.ThemesDir,
 		ConfigPath:            a.Paths.ConfigFile,
 		OnDelete:              onDelete,
 		OnSetLayout:           onSetLayout,
 		OnEdit:                onEdit,
 		OnOpenLayout:          onOpenLayout,
+		OnLaunch:              onLaunch,
+		StartupWarning:        startupWarning,
 		RefreshItems:          refresh,
 	})
 	if err != nil {
