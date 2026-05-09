@@ -8,12 +8,16 @@
 
 A project launcher for [Ghostty](https://ghostty.org).
 
+**macOS** · Ghostty 1.3.1+
+
+```sh
+brew install erzz/tap/boo
+```
+
 Switching between projects in a terminal usually means several minutes of yak-shaving: open a new
 window, `cd` to the right place, re-open your editor, re-launch the dev server, re-open lazygit in a
 split. boo collapses all of that into one command — `boo projA` — and remembers each project's
 layout (windows, tabs, splits, working directories, startup commands) so it's identical every time.
-
-So yes, the cheesy branding here is all about spawning lots of baby ghost(tty)s!
 
 ## Features
 
@@ -23,7 +27,7 @@ exactly how you like them!
 For example, I like to launch my vibe-coding project with a large opencode pane on the left with 2
 panes stacked on each other on the right for lazygit and nvim.
 
-`boo myvibeproject` launches a new ghossty window looking like this:
+`boo myvibeproject` launches a new ghostty window looking like this:
 
 <p align="center">
   <img src="docs/screenshots/vibe.png" alt="vibe-coding layout: opencode left, lazygit and nvim stacked on the right" width="800">
@@ -121,6 +125,7 @@ inside them keep running.
 | `o`                  | open the selected project's layout YAML in `$EDITOR` (TUI suspends, resumes on exit)       |
 | `d`                  | delete the selected project (asks to confirm)                                              |
 | `D`                  | delete **and** close the project's Ghostty window                                          |
+| `T`                  | cycle to the next theme                                                                    |
 | `?`                  | toggle full help                                                                           |
 | `q`, `esc`, `ctrl-c` | quit                                                                                       |
 
