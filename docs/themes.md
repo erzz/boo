@@ -19,6 +19,10 @@ boo ships several built-in themes (`default`, `tokyonight`, `solarized-dark`, `s
 
 ## How to switch themes
 
+Press `T` inside the picker to cycle through available themes and preview each one live. The
+selection is written back to `~/.config/boo/config.yaml` immediately — comments and other keys in
+the file are preserved. You can also set it manually:
+
 Set `ui.theme` in `~/.config/boo/config.yaml`:
 
 ```yaml

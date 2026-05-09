@@ -125,7 +125,7 @@ inside them keep running.
 | `o`                  | open the selected project's layout YAML in `$EDITOR` (TUI suspends, resumes on exit)       |
 | `d`                  | delete the selected project (asks to confirm)                                              |
 | `D`                  | delete **and** close the project's Ghostty window                                          |
-| `T`                  | cycle to the next theme                                                                    |
+| `T`                  | cycle to the next theme (persisted to `config.yaml` automatically)                        |
 | `?`                  | toggle full help                                                                           |
 | `q`, `esc`, `ctrl-c` | quit                                                                                       |
 
