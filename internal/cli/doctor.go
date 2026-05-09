@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -24,7 +25,8 @@ func newDoctorCmd() *cobra.Command { return newDoctorCmdWithRunner(nil) }
 // Used by tests to inject a fake runner so doctor's cobra path is exercised
 // without needing a live Ghostty or real osascript.
 func newDoctorCmdWithRunner(runnerIn booexec.Runner) *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check that your environment is set up to run boo",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -53,13 +55,21 @@ func newDoctorCmdWithRunner(runnerIn booexec.Runner) *cobra.Command {
 				doctor.ThemesCheck(paths.ThemesDir, validateUserThemes),
 			)
 			results, worst := doctor.Run(ctx, checks)
-			renderResults(cmd.OutOrStdout(), results)
+			if jsonOut {
+				if err := renderResultsJSON(cmd.OutOrStdout(), results); err != nil {
+					return err
+				}
+			} else {
+				renderResults(cmd.OutOrStdout(), results)
+			}
 			if worst == doctor.Fail {
 				return fmt.Errorf("doctor: one or more checks failed")
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output check results as a JSON array")
+	return cmd
 }
 
 // validateUserThemes returns the names of user theme files in dir
@@ -99,4 +109,32 @@ func renderResults(w io.Writer, results []doctor.Result) {
 			_, _ = fmt.Fprintf(w, "       hint: %s\n", r.Hint)
 		}
 	}
+}
+
+// doctorResultJSON is the JSON shape for a single check result in
+// `boo doctor --json`. Status is serialised as the string OK/SKIP/WARN/FAIL.
+type doctorResultJSON struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+	Hint   string `json:"hint,omitempty"`
+}
+
+// renderResultsJSON writes the check results as a JSON array to w.
+// Each element carries name, status (string), detail, and hint.
+// Exit-code semantics (non-zero on FAIL) are preserved by the caller
+// and are independent of this function.
+func renderResultsJSON(w io.Writer, results []doctor.Result) error {
+	out := make([]doctorResultJSON, len(results))
+	for i, r := range results {
+		out[i] = doctorResultJSON{
+			Name:   r.Name,
+			Status: r.Status.String(),
+			Detail: r.Detail,
+			Hint:   r.Hint,
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }

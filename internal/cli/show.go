@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -17,10 +20,11 @@ import (
 // now", they should be able to ask without opening a TUI or grepping
 // `boo list`'s columns.
 //
-// Output is human-formatted, two-column. A future --json flag (G5)
-// will give the same data in machine-readable form.
+// Output is human-formatted, two-column by default. Pass --json for
+// machine-readable JSON (snake_case keys, RFC 3339 timestamps).
 func newShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "show <name>",
 		Short: "Print everything boo knows about a project",
 		Long: `Print the full record for one project: source directory,
@@ -28,7 +32,9 @@ template name, runtime status, last-launched timestamp, and the paths
 of the layout and runtime state files boo manages for it.
 
 Useful for debugging ("is boo seeing what I think it is?") and as the
-fastest way to find a project's layout file for hand-editing.`,
+fastest way to find a project's layout file for hand-editing.
+
+Use --json to emit a single JSON object suitable for scripting.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			a, err := newApp()
@@ -57,6 +63,10 @@ fastest way to find a project's layout file for hand-editing.`,
 				if exists, err := a.Ghostty.WindowExists(c.Context(), rt.WindowID); err == nil && exists {
 					status = "running"
 				}
+			}
+
+			if jsonOut {
+				return renderShowJSON(c.OutOrStdout(), p, rt, status, a)
 			}
 
 			lastLaunched := "never"
@@ -94,4 +104,42 @@ fastest way to find a project's layout file for hand-editing.`,
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output as JSON")
+	return cmd
+}
+
+// showOutputJSON is the JSON shape for `boo show --json`. Uses snake_case
+// to match the project.Runtime JSON convention (window_id, last_launched_at).
+type showOutputJSON struct {
+	Name           string     `json:"name"`
+	Dir            string     `json:"dir"`
+	Layout         string     `json:"layout"`
+	Status         string     `json:"status"`
+	WindowID       string     `json:"window_id,omitempty"`
+	LastLaunchedAt *time.Time `json:"last_launched_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	LayoutFile     string     `json:"layout_file"`
+	StateFile      string     `json:"state_file"`
+	StateDir       string     `json:"state_dir"`
+}
+
+func renderShowJSON(w io.Writer, p project.Project, rt project.Runtime, status string, a *app) error {
+	out := showOutputJSON{
+		Name:       p.Name,
+		Dir:        p.Dir,
+		Layout:     p.Layout,
+		Status:     status,
+		WindowID:   rt.WindowID,
+		CreatedAt:  p.CreatedAt,
+		LayoutFile: a.Paths.ProjectLayoutFile(p.Name),
+		StateFile:  a.Paths.ProjectStateFile(p.Name),
+		StateDir:   a.Paths.ProjectDir(p.Name),
+	}
+	if !rt.LastLaunchedAt.IsZero() {
+		t := rt.LastLaunchedAt
+		out.LastLaunchedAt = &t
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
