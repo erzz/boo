@@ -254,7 +254,7 @@ Per-pane env merges with your shell's env; it does not replace it.
   the same preview live as you cycle through templates with ←/→ or h/l.
 - **`boo new --layout <name>`** picks the layout for a new project, but
   the project remembers it. Subsequent `boo <project>` calls reuse the
-  saved layout file in `~/.local/share/boo/projects/<name>/layout.yaml`.
+  saved layout file in `~/.config/boo/projects/<name>/layout.yaml`.
 - **To change a project's layout**, edit its `layout.yaml` directly. Or
   re-save from a rearranged window with `boo save` — but mind the
   capture caveats above.

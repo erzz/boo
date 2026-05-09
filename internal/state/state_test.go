@@ -55,7 +55,7 @@ func TestForRoot_AndEnsureDirs(t *testing.T) {
 	if err := p.EnsureDirs(); err != nil {
 		t.Fatalf("EnsureDirs: %v", err)
 	}
-	for _, d := range []string{p.ConfigDir, p.DataDir, p.LayoutsDir, p.ProjectsDir} {
+	for _, d := range []string{p.ConfigDir, p.LayoutsDir, p.ProjectsDir} {
 		if st, err := os.Stat(d); err != nil || !st.IsDir() {
 			t.Fatalf("expected dir %s to exist: %v", d, err)
 		}

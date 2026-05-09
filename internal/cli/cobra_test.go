@@ -78,7 +78,7 @@ func TestCobra_ConfigPath_PrintsConfigFilePath(t *testing.T) {
 		t.Fatalf("boo config path: unexpected error: %v", err)
 	}
 	// Output must contain the expected config file path.
-	wantSubstr := filepath.Join("config", "config.yaml")
+	wantSubstr := "config.yaml"
 	if !strings.Contains(stdout, wantSubstr) {
 		t.Errorf("stdout %q does not contain %q", stdout, wantSubstr)
 	}

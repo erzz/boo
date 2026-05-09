@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -74,6 +75,7 @@ func AllChecks(client *ghostty.Client) []CheckFunc {
 		ghosttyVersionRangeCheck(client),
 		ghosttyAutomationCheck(client),
 		checkFzfOptional,
+		legacyDataDirCheck(),
 	}
 }
 
@@ -398,4 +400,37 @@ func isAutomationDenied(msg string) bool {
 	return strings.Contains(msg, "-1743") ||
 		strings.Contains(strings.ToLower(msg), "not authorised") ||
 		strings.Contains(strings.ToLower(msg), "not authorized")
+}
+
+// legacyDataDirCheck warns if old boo state exists under XDG_DATA_HOME.
+// boo no longer uses that location; everything lives under XDG_CONFIG_HOME.
+func legacyDataDirCheck() CheckFunc {
+	return func(_ context.Context, _ []Result) Result {
+		dataHome := os.Getenv("XDG_DATA_HOME")
+		if dataHome == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return Result{Name: "legacy data dir", Status: OK}
+			}
+			dataHome = filepath.Join(home, ".local", "share")
+		}
+		legacyDir := filepath.Join(dataHome, "boo")
+		hasTOML := false
+		if _, err := os.Stat(filepath.Join(legacyDir, "projects.toml")); err == nil {
+			hasTOML = true
+		}
+		hasProjects := false
+		if _, err := os.Stat(filepath.Join(legacyDir, "projects")); err == nil {
+			hasProjects = true
+		}
+		if hasTOML || hasProjects {
+			return Result{
+				Name:   "legacy data dir",
+				Status: Warn,
+				Detail: fmt.Sprintf("old boo state found at %s", legacyDir),
+				Hint:   "boo no longer uses XDG_DATA_HOME. You can safely delete " + legacyDir + ".",
+			}
+		}
+		return Result{Name: "legacy data dir", Status: OK}
+	}
 }

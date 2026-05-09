@@ -43,8 +43,8 @@ func (l *Lock) Close() error {
 	return l.f.Close()
 }
 
-// LockPath returns the canonical lock file path inside DataDir.
-func (p Paths) LockPath() string { return filepath.Join(p.DataDir, ".lock") }
+// LockPath returns the canonical lock file path inside ConfigDir.
+func (p Paths) LockPath() string { return filepath.Join(p.ConfigDir, ".lock") }
 
 // WithLock acquires the boo data lock, runs fn, and releases the lock.
 // Any error from fn is returned unchanged.

@@ -123,7 +123,7 @@ func openProjectWindow(ctx context.Context, a *app, p project.Project) (*ghostty
 // snapshot is recoverable — we just regenerate it. This handles:
 //
 //   - Pre-1.0 users with stale .toml snapshots that got cleaned up.
-//   - Anyone who blew away ~/.local/share/boo by accident.
+//   - Anyone who blew away ~/.config/boo by accident.
 //   - Future schema bumps where the on-disk snapshot version is too old.
 //
 // Hard errors (parse failures on a present file, missing template) still

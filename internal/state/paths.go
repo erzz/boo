@@ -1,15 +1,12 @@
 // Package state owns boo's on-disk paths and atomic file IO.
 //
-// All persistent files boo writes go through this package. Path layout
-// follows the XDG Base Directory spec on macOS, mirroring Linux conventions
-// for portability:
+// All persistent files boo writes go through this package. Everything
+// lives under a single config root:
 //
 //	$XDG_CONFIG_HOME/boo/   (default ~/.config/boo)
 //	  config.yaml           — global config
 //	  layouts/*.yaml        — user-defined shared layout templates
 //	  themes/*.yaml         — user-defined visual themes
-//
-//	$XDG_DATA_HOME/boo/     (default ~/.local/share/boo)
 //	  projects.toml         — registry index
 //	  projects/<name>/
 //	    layout.yaml         — resolved layout snapshot
@@ -25,20 +22,18 @@ import (
 // Paths is the resolved set of directories and files boo uses.
 type Paths struct {
 	ConfigDir   string // ~/.config/boo
-	DataDir     string // ~/.local/share/boo
 	ConfigFile  string // ConfigDir/config.yaml
 	LayoutsDir  string // ConfigDir/layouts
 	ThemesDir   string // ConfigDir/themes
-	Registry    string // DataDir/projects.toml
-	ProjectsDir string // DataDir/projects
+	Registry    string // ConfigDir/projects.toml
+	ProjectsDir string // ConfigDir/projects
 }
 
 // Default returns the standard paths derived from XDG env vars (or sensible
 // macOS/Linux fallbacks).
 //
-// If $BOO_HOME is set, it overrides everything: ConfigDir = $BOO_HOME/config
-// and DataDir = $BOO_HOME/data. This is intended for tests, isolation during
-// experimentation, and power users who want all boo state in one place.
+// If $BOO_HOME is set, it overrides everything: all state lives under $BOO_HOME.
+// This is intended for tests and power users who want all boo state in one place.
 func Default() (Paths, error) {
 	if root := os.Getenv("BOO_HOME"); root != "" {
 		return ForRoot(root), nil
@@ -51,28 +46,23 @@ func Default() (Paths, error) {
 	if cfg == "" {
 		cfg = filepath.Join(home, ".config")
 	}
-	data := os.Getenv("XDG_DATA_HOME")
-	if data == "" {
-		data = filepath.Join(home, ".local", "share")
-	}
-	return forBase(filepath.Join(cfg, "boo"), filepath.Join(data, "boo")), nil
+	return forBase(filepath.Join(cfg, "boo")), nil
 }
 
 // ForRoot returns Paths rooted at a single base directory. Used in tests so
-// tests don't pollute the user's real config/data dirs.
+// tests don't pollute the user's real config dir.
 func ForRoot(root string) Paths {
-	return forBase(filepath.Join(root, "config"), filepath.Join(root, "data"))
+	return forBase(root)
 }
 
-func forBase(configDir, dataDir string) Paths {
+func forBase(configDir string) Paths {
 	return Paths{
 		ConfigDir:   configDir,
-		DataDir:     dataDir,
 		ConfigFile:  filepath.Join(configDir, "config.yaml"),
 		LayoutsDir:  filepath.Join(configDir, "layouts"),
 		ThemesDir:   filepath.Join(configDir, "themes"),
-		Registry:    filepath.Join(dataDir, "projects.toml"),
-		ProjectsDir: filepath.Join(dataDir, "projects"),
+		Registry:    filepath.Join(configDir, "projects.toml"),
+		ProjectsDir: filepath.Join(configDir, "projects"),
 	}
 }
 
@@ -96,10 +86,10 @@ func (p Paths) ProjectStateFile(name string) string {
 	return filepath.Join(p.ProjectDir(name), "state.json")
 }
 
-// EnsureDirs creates ConfigDir, DataDir, LayoutsDir, and ProjectsDir if they
+// EnsureDirs creates ConfigDir, LayoutsDir, and ProjectsDir if they
 // don't already exist.
 func (p Paths) EnsureDirs() error {
-	for _, d := range []string{p.ConfigDir, p.DataDir, p.LayoutsDir, p.ProjectsDir} {
+	for _, d := range []string{p.ConfigDir, p.LayoutsDir, p.ProjectsDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return fmt.Errorf("state: mkdir %s: %w", d, err)
 		}

@@ -24,9 +24,8 @@ func makeAppForLayouts(t *testing.T) *app {
 	dir := t.TempDir()
 	p := state.Paths{
 		ConfigDir:   filepath.Join(dir, "config"),
-		DataDir:     filepath.Join(dir, "data"),
 		LayoutsDir:  filepath.Join(dir, "config", "layouts"),
-		ProjectsDir: filepath.Join(dir, "data", "projects"),
+		ProjectsDir: filepath.Join(dir, "config", "projects"),
 	}
 	if err := p.EnsureDirs(); err != nil {
 		t.Fatalf("EnsureDirs: %v", err)

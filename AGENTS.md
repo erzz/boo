@@ -14,7 +14,7 @@ Go 1.24+, cobra (CLI), Bubble Tea + Lip Gloss + Bubbles (TUI), `sigs.k8s.io/yaml
 - `internal/layout/` — layout tree model, YAML parsing, validation, built-in templates
 - `internal/layoutpreview/` — ASCII renderer for layout previews (used by `boo layouts` and the TUI form)
 - `internal/project/` — project model and registry CRUD
-- `internal/state/` — XDG paths, atomic file IO
+- `internal/state/` — XDG paths, atomic file IO; all state under `$XDG_CONFIG_HOME/boo/`
 - `internal/config/` — global config loader (YAML at `~/.config/boo/config.yaml`)
 - `internal/picker/` — Bubble Tea TUI (project list + new-project form with layout cycler)
 - `internal/doctor/` — environment checks
@@ -78,4 +78,4 @@ make fmt         # gofmt + goimports
 - JXA escaping is treacherous. Always build the parameter object as JSON in Go, then embed it into the JXA script as a single `JSON.parse(...)` call. Never string-concatenate user values into JS source.
 - **Surface configuration properties are silently dropped if passed to `newSurfaceConfiguration({...})`.** Construct the empty config, then assign properties to the returned record (`cfg.initialWorkingDirectory = "..."`). Re-test if Ghostty's sdef changes.
 - Ghostty is pre-2.0 and the AppleScript API surface may change. Pin a tested version range in `doctor` and warn on mismatch — don't hard-fail.
-- Pre-release: no migration code. Old `~/.config/boo/layouts/*.toml` and `~/.local/share/boo/projects/*/layout.toml` from before the YAML migration will fail to parse — delete them.
+- Pre-release: no migration code. Old `~/.config/boo/layouts/*.toml` and `~/.config/boo/projects/*/layout.toml` from before the YAML migration will fail to parse — delete them. If you have old state under `~/.local/share/boo/` from before the config consolidation, `boo doctor` will warn you — delete it.

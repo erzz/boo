@@ -157,7 +157,7 @@ func TestRegistryUpdate_UnknownProjectIsErrNotFound(t *testing.T) {
 // loadOrRegenerateLayout regenerates the snapshot from the registry's
 // template name when the on-disk file is missing. This handles old
 // pre-YAML installs whose stale .toml snapshots got cleaned up, and
-// anyone who blew away ~/.local/share/boo by accident.
+// anyone who blew away ~/.config/boo by accident.
 func TestLoadOrRegenerateLayout_RecreatesMissingSnapshot(t *testing.T) {
 	a := makeAppForCmds(t)
 	dir := t.TempDir()

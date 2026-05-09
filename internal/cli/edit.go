@@ -10,7 +10,7 @@ import (
 )
 
 // newEditCmd opens a project's per-project layout snapshot
-// (~/.local/share/boo/projects/<name>/layout.yaml) in $EDITOR.
+// (~/.config/boo/projects/<name>/layout.yaml) in $EDITOR.
 //
 // This is the power-user counterpart to `boo set-layout`: rather than
 // switching to a different template, the user can fine-tune the saved
@@ -23,7 +23,7 @@ func newEditCmd() *cobra.Command {
 		Short: "Open a project's layout file in $EDITOR",
 		Long: `Open the per-project layout snapshot for <name> in $EDITOR.
 
-The layout file lives under boo's data directory (run 'boo show <name>'
+The layout file lives under boo's config directory (run 'boo show <name>'
 to see its exact path). Edits are not validated until boo next loads
 the file — if you save broken YAML, the next 'boo <name>' will error.
 
