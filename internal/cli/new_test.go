@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/erzz/boo/internal/config"
 	"github.com/erzz/boo/internal/picker"
 )
 
@@ -157,3 +160,94 @@ func TestExpandRepoShorthand(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildNewProjectDefaults_CloneFlow_DerivesDirFromURL checks that when
+// --from is given and no --dir/--into, the form's Dir is derived from the URL
+// (not set to cwd).  This prevents the bug where cloning would happen into the
+// current directory instead of a subdirectory named after the repo.
+func TestBuildNewProjectDefaults_CloneFlow_DerivesDirFromURL(t *testing.T) {
+	a := makeAppForCmds(t)
+	a.Config = config.DefaultConfig()
+
+	defs, err := buildNewProjectDefaults(a, defaultsFromFlags{
+		from: "https://github.com/owner/myrepo.git",
+	})
+	if err != nil {
+		t.Fatalf("buildNewProjectDefaults: %v", err)
+	}
+
+	// Dir should be derived from the URL — basename must be the repo name.
+	if filepath.Base(defs.Dir) != "myrepo" {
+		t.Errorf("Dir = %q, want basename 'myrepo' (derived from URL)", defs.Dir)
+	}
+
+	// Dir must NOT equal the current working directory (that was the bug).
+	cwd, _ := os.Getwd()
+	if defs.Dir == cwd {
+		t.Error("Dir must not be cwd for clone flows — cloning into cwd itself is wrong")
+	}
+
+	// From should be passed through unchanged.
+	if defs.From != "https://github.com/owner/myrepo.git" {
+		t.Errorf("From = %q, want the original URL", defs.From)
+	}
+}
+
+// TestBuildNewProjectDefaults_CloneFlow_ExplicitIntoWins verifies that an
+// explicit --into flag overrides URL-derived destination.
+func TestBuildNewProjectDefaults_CloneFlow_ExplicitIntoWins(t *testing.T) {
+	a := makeAppForCmds(t)
+	a.Config = config.DefaultConfig()
+
+	target := t.TempDir()
+	defs, err := buildNewProjectDefaults(a, defaultsFromFlags{
+		from: "https://github.com/owner/myrepo.git",
+		into: target,
+	})
+	if err != nil {
+		t.Fatalf("buildNewProjectDefaults: %v", err)
+	}
+
+	// Explicit --into must win.
+	if defs.Dir != target {
+		t.Errorf("Dir = %q, want %q (explicit --into must override URL derivation)", defs.Dir, target)
+	}
+}
+
+// TestBuildNewProjectDefaults_CloneFlow_ExplicitDirWins verifies that an
+// explicit --dir flag overrides URL-derived destination.
+func TestBuildNewProjectDefaults_CloneFlow_ExplicitDirWins(t *testing.T) {
+	a := makeAppForCmds(t)
+	a.Config = config.DefaultConfig()
+
+	target := t.TempDir()
+	defs, err := buildNewProjectDefaults(a, defaultsFromFlags{
+		from: "https://github.com/owner/myrepo.git",
+		dir:  target,
+	})
+	if err != nil {
+		t.Fatalf("buildNewProjectDefaults: %v", err)
+	}
+
+	if defs.Dir != target {
+		t.Errorf("Dir = %q, want %q (explicit --dir must override URL derivation)", defs.Dir, target)
+	}
+}
+
+// TestBuildNewProjectDefaults_NonCloneFlow_UsesCwd ensures that for the
+// non-clone ("register existing dir") path, Dir still defaults to cwd.
+func TestBuildNewProjectDefaults_NonCloneFlow_UsesCwd(t *testing.T) {
+	a := makeAppForCmds(t)
+	a.Config = config.DefaultConfig()
+
+	defs, err := buildNewProjectDefaults(a, defaultsFromFlags{})
+	if err != nil {
+		t.Fatalf("buildNewProjectDefaults: %v", err)
+	}
+
+	cwd, _ := os.Getwd()
+	if defs.Dir != cwd {
+		t.Errorf("Dir = %q, want cwd %q for non-clone flow", defs.Dir, cwd)
+	}
+}
+

@@ -154,17 +154,33 @@ type defaultsFromFlags struct {
 func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults, error) {
 	cwd, _ := os.Getwd()
 
-	// Directory: explicit --dir wins; otherwise --into (for clones); otherwise
-	// cwd as a sensible default for "register what I'm in".
+	// Directory: explicit --dir wins; otherwise --into (for clones); for
+	// non-clone flows fall back to cwd (register the directory you're in).
+	// For clone flows with no explicit destination, derive the destination
+	// from the URL so the form shows the actual target rather than cwd.
 	dir := strings.TrimSpace(fl.dir)
 	if dir == "" {
 		dir = strings.TrimSpace(fl.into)
 	}
-	if dir == "" {
+	if dir == "" && fl.from == "" {
+		// Non-clone flow: default to the current working directory so
+		// "boo new" inside a git repo pre-fills the form with that dir.
 		dir = cwd
 	}
-	if abs, err := filepath.Abs(dir); err == nil {
-		dir = abs
+	if dir == "" && fl.from != "" {
+		// Clone flow: derive the destination from the URL the same way
+		// runCreateProject will, so the form shows the real target.
+		// Best-effort: if resolution fails (e.g. malformed URL) leave
+		// dir empty; the form can still be submitted with a manual path.
+		expanded := expandRepoShorthand(fl.from, a.Config.GitDefaultRemoteOr(""))
+		if derived, err := resolveCloneDestination("", expanded, a.Config.ProjectsDirOr("")); err == nil {
+			dir = derived
+		}
+	}
+	if dir != "" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
 	}
 
 	// Git remote: only inspected when dir exists. Best-effort; absent remote
@@ -178,13 +194,17 @@ func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults,
 	}
 
 	// Name: explicit positional arg wins; otherwise the git-derived repo name
-	// (preferred when distinct from the path basename); otherwise basename.
+	// (preferred when distinct from the path basename); otherwise basename of
+	// the resolved dir; for clone flows with a known URL, derive from the URL.
 	name := strings.TrimSpace(fl.name)
 	if name == "" {
 		if repoName != "" {
 			name = repoName
-		} else {
+		} else if dir != "" && filepath.Base(dir) != "." {
 			name = filepath.Base(dir)
+		} else if fl.from != "" {
+			// Clone flow where dir derivation failed — try URL directly.
+			name = repoNameFromRemoteURL(fl.from)
 		}
 	}
 
