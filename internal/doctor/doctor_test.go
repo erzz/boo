@@ -295,3 +295,30 @@ func TestGhosttyVersionRangeCheck_CheckNameIsStable(t *testing.T) {
 	}
 }
 
+// ─── AllChecks composition / wiring ──────────────────────────────────────────
+
+// TestAllChecks_IncludesGhosttyVersionCheck is a composition smoke test.
+// It asserts that AllChecks() includes ghosttyVersionRangeCheck in its chain
+// by verifying a Result with Name "ghostty version" appears in the output.
+//
+// The version check is correctly skipped when Ghostty is not installed or not
+// running, so this test only checks the Name field — not the Status. The
+// important invariant is: a future refactor that accidentally removes the call
+// to ghosttyVersionRangeCheck from AllChecks will be caught here.
+func TestAllChecks_IncludesGhosttyVersionCheck(t *testing.T) {
+	// Build a client that returns a valid in-range version. Even if earlier
+	// checks (platform, ghostty installed, ghostty running) cause the version
+	// check to be skipped, the Result still carries Name="ghostty version".
+	client := newVersionClient(`{"version":"1.3.5"}`, nil)
+
+	checks := AllChecks(client)
+	results, _ := Run(context.Background(), checks)
+
+	for _, r := range results {
+		if r.Name == "ghostty version" {
+			return // found — wiring is intact
+		}
+	}
+	t.Errorf("AllChecks() result set does not contain a result with Name='ghostty version'; ghosttyVersionRangeCheck may have been removed from the chain")
+}
+
