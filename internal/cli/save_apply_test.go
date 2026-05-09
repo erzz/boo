@@ -8,17 +8,11 @@ import (
 	"github.com/erzz/boo/internal/layout"
 )
 
-// applySaveOutcome is the user-facing decision matrix lifted out of the
-// save command's RunE. These tests pin down what each outcome should do:
-// where the diff goes, whether the prompt fires, and how --force interacts
-// with each branch. Without them, a future refactor could (e.g.) silently
-// route the lossy diff to stdout, masking unrecoverable data loss in
-// scripts that only capture stderr.
+// save_apply_test.go pins the applySaveOutcome decision matrix:
+// where each diff type routes (stdout vs stderr), when the prompt fires, and how --force interacts.
+// Without these, a refactor could silently route lossy diffs to stdout, hiding data loss.
 
-// silentLossy is just enough of a SaveDiff to look like a lossy save when
-// applySaveOutcome inspects Outcome and renders. We don't need a real
-// before/after — only the renderer cares about the structure, and we
-// assert against the renderer's output via substring matching.
+// silentDiff / structuralDiff / lossyDiff build minimal SaveDiff fixtures for applySaveOutcome tests.
 func silentDiff() SaveDiff { return SaveDiff{Outcome: OutcomeSilent} }
 func structuralDiff() SaveDiff {
 	return SaveDiff{Outcome: OutcomeStructural, ChangedTabs: oneTabDiff()}

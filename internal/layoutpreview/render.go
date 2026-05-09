@@ -1,23 +1,7 @@
-// Package layoutpreview renders a layout.Layout as ASCII art for use in
-// `boo layouts` and the new-project TUI preview pane.
-//
-// The model
-// ---------
-// A tab's content is a recursive tree of splits (see internal/layout):
-//
-//   - A leaf is a single terminal cell.
-//   - An interior node has direction = "row" (children laid left-to-right
-//     in equal-width columns) or "column" (children stacked top-to-bottom
-//     in equal-height rows) and >= 2 children.
-//
-// The renderer walks the tree allocating each node a rectangle, then paints
-// borders and content. Adjacent siblings share a 1-cell border so the
-// dividers coalesce — the right edge of the left sibling and the left edge
-// of the right sibling occupy the same column, both drawing '|', producing
-// a single-pixel divider.
-//
-// Public API: RenderTab and RenderLayout. Output is plain ASCII (+, -, |),
-// no Unicode, exact width/height guarantees per RenderTab.
+// Package layoutpreview renders a layout.Layout as ASCII art for `boo layouts`
+// and the new-project TUI preview. The renderer walks the split tree allocating
+// rectangles, then paints borders and content. Adjacent siblings share a 1-cell
+// border so dividers coalesce. Output: plain ASCII (+, -, |), no Unicode.
 package layoutpreview
 
 import (
@@ -27,26 +11,16 @@ import (
 	"github.com/erzz/boo/internal/layout"
 )
 
-// Geometry constants.
-//
-// Min*  are *exterior* leaf dimensions (including borders). MinLeafHeight=4
-// gives 2 interior rows so cwd + an annotation line both fit; smaller and
-// annotations silently disappear, which is worse than a slightly larger
-// preview.
+// Geometry constants. MinLeafHeight=4 gives 2 interior rows so cwd + an
+// annotation line both fit without silently disappearing.
 const (
 	MinLeafWidth  = 12
 	MinLeafHeight = 4
 )
 
-// RenderTab paints one tab's split tree at the given width × height.
-//
-// Guarantees:
-//   - Output is exactly height lines tall.
-//   - Every line is exactly width characters wide (padded with spaces).
-//   - ASCII only: +, -, |, space, plus content text.
-//
-// width / height below the Min* floors are bumped up rather than producing
-// degenerate output — small previews are noisier than misleading.
+// RenderTab paints one tab's split tree at width × height.
+// Output is exactly height lines tall and width chars wide (space-padded).
+// Inputs below Min* floors are bumped up rather than producing degenerate output.
 func RenderTab(t layout.Tab, width, height int) string {
 	if width < MinLeafWidth {
 		width = MinLeafWidth
@@ -72,14 +46,8 @@ func RenderTab(t layout.Tab, width, height int) string {
 	return b.String()
 }
 
-// RenderLayout renders an entire layout: one labelled box per tab,
-// stacked vertically. Tabs are stacked rather than placed side-by-side
-// so layouts with many tabs don't wrap awkwardly at typical terminal
-// widths.
-//
-// width is the target outer width per tab. Height per tab is derived
-// from the tree's column-depth (how many vertically-stacked rows the
-// tab needs).
+// RenderLayout renders an entire layout: one labelled box per tab, stacked
+// vertically. Tab height is derived from the tree's column-depth.
 func RenderLayout(l layout.Layout, width int) string {
 	if width < MinLeafWidth+2 {
 		width = MinLeafWidth + 2
@@ -99,14 +67,8 @@ func RenderLayout(l layout.Layout, width int) string {
 	return strings.Join(blocks, "\n\n")
 }
 
-// tabHeight gives a tab enough vertical space to render every nested
-// column without squashing leaves below MinLeafHeight.
-//
-// We measure "column depth" — the maximum number of vertically-stacked
-// leaves on any path from root to leaf — and multiply by MinLeafHeight.
-// A tab with no column splits gets exactly MinLeafHeight, which is
-// what we want for the all-leaves and all-row cases (1x1x1, 1x2x1,
-// 2x1x1, 2x2x1).
+// tabHeight returns a tab's required height in rows, based on column-depth
+// (max vertically-stacked leaves on any root→leaf path) × MinLeafHeight.
 func tabHeight(t layout.Tab) int {
 	d := columnDepth(t.Root)
 	if d < 1 {
@@ -115,11 +77,7 @@ func tabHeight(t layout.Tab) int {
 	return d * MinLeafHeight
 }
 
-// columnDepth returns the height the subtree needs in MinLeafHeight units.
-//
-//   - leaf: 1
-//   - row: max over children (children share the row's height)
-//   - column: sum over children (children stack)
+// columnDepth returns height in MinLeafHeight units: leaf=1, row=max(children), column=sum(children).
 func columnDepth(s layout.Split) int {
 	if s.IsLeaf() {
 		return 1
@@ -146,16 +104,8 @@ func columnDepth(s layout.Split) int {
 }
 
 // drawSplit recursively paints split s into the rectangle (x,y)-(x+w,y+h).
-//
-// For interior nodes we allocate equal-sized cells per child along the
-// split axis, with a 1-cell overlap so adjacent borders coalesce.
-//
-// Sizing: an interior node with N children gets a total width (or
-// height, for column) of w; each child gets `(w + N - 1) / N` rounded
-// such that consecutive children share their inner edge. Concretely
-// we compute child rectangles end-to-end making each child's start =
-// previous child's end - 1 (overlap by 1). This is the same trick the
-// old renderer used for the binary case, generalised to N children.
+// Interior nodes allocate equal-sized cells per child with 1-cell overlap so
+// adjacent borders coalesce.
 func drawSplit(grid [][]rune, s layout.Split, x, y, w, h int) {
 	if w <= 0 || h <= 0 {
 		return
@@ -166,8 +116,7 @@ func drawSplit(grid [][]rune, s layout.Split, x, y, w, h int) {
 	}
 	n := len(s.Children)
 	if n < 2 {
-		// Defensive: validation enforces >=2, but if we somehow get
-		// here just render the only child filling the rect.
+		// Defensive: validation enforces >=2, but render best-effort if not.
 		if n == 1 {
 			drawSplit(grid, s.Children[0], x, y, w, h)
 		}
@@ -175,9 +124,7 @@ func drawSplit(grid [][]rune, s layout.Split, x, y, w, h int) {
 	}
 
 	if s.Direction == layout.DirColumn {
-		// Stack children vertically. Each child gets a slice of the
-		// total height; consecutive children overlap by 1 row so
-		// horizontal borders coalesce.
+		// Stack children vertically; consecutive children overlap by 1 row so horizontal borders coalesce.
 		offsets := allocate(h, n)
 		for i, child := range s.Children {
 			yi := y + offsets[i]
@@ -203,15 +150,8 @@ func drawSplit(grid [][]rune, s layout.Split, x, y, w, h int) {
 	}
 }
 
-// allocate divides a span of length L into n+1 cumulative offsets such
-// that each child occupies roughly L/n cells. The returned slice has
-// length n+1: child i goes from offsets[i] to offsets[i+1] (with the
-// shared-border overlap added by the caller).
-//
-// We accumulate fractionally so leftover cells are distributed across
-// the early children rather than dumped into the last child — that
-// way `1x2x2` renders with two equal-width left and right halves
-// rather than [left=24, right=26].
+// allocate divides span L into n+1 cumulative offsets, distributing leftover
+// cells across early children for even sizing (e.g. 1x2x2 gets equal halves).
 func allocate(L, n int) []int {
 	out := make([]int, n+1)
 	for i := 0; i <= n; i++ {
@@ -223,10 +163,7 @@ func allocate(L, n int) []int {
 	return out
 }
 
-// drawLeaf paints a single bordered cell with the split's annotation.
-// Adjacent cells share borders — when this cell starts on a column or
-// row that already has a border character from a neighbour, we
-// overwrite with the same character (idempotent).
+// drawLeaf paints a single bordered cell. Adjacent cells share borders (idempotent overwrite).
 func drawLeaf(grid [][]rune, s layout.Split, x, y, w, h int) {
 	if w < 3 || h < 3 {
 		// Too small to draw a border. Just dot-fill so it's visible.
@@ -254,8 +191,7 @@ func drawLeaf(grid [][]rune, s layout.Split, x, y, w, h int) {
 	setRune(grid, x, y+h-1, '+')
 	setRune(grid, x+w-1, y+h-1, '+')
 
-	// Content lines: cwd, then optional annotation. Centred vertically
-	// inside the leaf for a calmer look.
+	// Content: cwd + optional annotation, vertically centred inside the leaf.
 	innerW := w - 2
 	innerH := h - 2
 	lines := leafLines(s, innerW)
@@ -271,10 +207,8 @@ func drawLeaf(grid [][]rune, s layout.Split, x, y, w, h int) {
 	}
 }
 
-// leafLines returns the 1–2 lines of text shown inside a leaf cell:
-// cwd on the first line, then the most-relevant annotation if there
-// is room. We don't try to show every annotation — it would force
-// taller cells everywhere.
+// leafLines returns 1–2 lines of text for a leaf cell: cwd, then the most
+// relevant annotation if there is room.
 func leafLines(s layout.Split, innerW int) []string {
 	cwd := s.Cwd
 	if cwd == "" {
@@ -305,8 +239,7 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "~"
 }
 
-// writeText writes s into grid starting at (x,y), padding/truncating
-// to fit width chars. Centres horizontally for a small layout.
+// writeText writes s into grid at (x,y), padding/truncating to width chars, horizontally centred.
 func writeText(grid [][]rune, x, y, width int, s string) {
 	if y < 0 || y >= len(grid) {
 		return

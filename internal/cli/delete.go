@@ -16,9 +16,7 @@ import (
 
 func newDeleteCmd() *cobra.Command { return newDeleteCmdWithApp(nil) }
 
-// newDeleteCmdWithApp is like newDeleteCmd but uses appIn instead of
-// calling newApp() inside RunE.  Pass nil for production behaviour.
-// Used by tests to inject a fake *app.
+// newDeleteCmdWithApp is like newDeleteCmd but accepts a pre-built *app for testing.
 func newDeleteCmdWithApp(appIn *app) *cobra.Command {
 	var (
 		purge bool
@@ -105,18 +103,10 @@ You will be asked to confirm; pass --force to skip the prompt.`,
 	return cmd
 }
 
-// executeDelete performs the side-effect half of `boo delete`: optional
-// window-close, registry removal, and state-dir purge.
-//
-// Returns (warnings, error). warnings accumulates all non-fatal side-effect
-// failures (e.g. CloseWindow failed, state-dir purge failed). A non-nil
-// error means the deletion itself failed (registry removal or save). The
-// success line is NOT printed here — callers decide how to surface it (CLI
-// prints to stdout; the TUI picker sets a status bar message).
-//
-// Extracted so the bare-`boo` TUI can reuse it after the in-modal
-// confirmation, without re-prompting the user. Callers MUST hold the
-// state lock (a.Paths.WithLock).
+// executeDelete performs the side-effect half of `boo delete`: optional window-close,
+// registry removal, and state-dir purge. Returns (warnings, error). Non-nil warnings
+// = deletion succeeded but non-fatal side effects failed. Non-nil error = deletion failed.
+// Does not print; callers decide how to surface results. Callers MUST hold the state lock.
 func executeDelete(ctx context.Context, a *app, reg *project.Registry, p project.Project, purge bool) ([]string, error) {
 	var warnings []string
 	if purge {
@@ -141,9 +131,7 @@ func executeDelete(ctx context.Context, a *app, reg *project.Registry, p project
 	return warnings, nil
 }
 
-// pickProjectForDelete shows the TUI picker in selection-only mode and
-// returns the chosen project name, or "" if the user cancelled. Returns a
-// clean error (no picker shown) when the registry is empty.
+// pickProjectForDelete shows the TUI picker in selection-only mode. Returns "" on cancel.
 func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 	reg, err := project.Load(a.Paths)
 	if err != nil {
@@ -169,9 +157,7 @@ func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 	if res.Cancelled() {
 		return "", nil
 	}
-	// In selection-only mode, both enter (SwitchIntent) and d/D
-	// (DeleteIntent after confirm) are reasonable ways to indicate
-	// "this is the project to delete". Treat them identically.
+	// In selection-only mode, enter (SwitchIntent) and d/D (DeleteIntent) both mean "this one".
 	switch v := res.Intent.(type) {
 	case picker.SwitchIntent:
 		return v.Name, nil
@@ -182,9 +168,7 @@ func pickProjectForDelete(ctx context.Context, a *app) (string, error) {
 	}
 }
 
-// confirmDelete asks the user to confirm a delete, spelling out exactly what
-// will and won't be touched. Empty input or anything other than y/yes counts
-// as "no", so an accidental Enter is safe.
+// confirmDelete asks the user to confirm a delete. Only y/yes counts as yes.
 func confirmDelete(in io.Reader, out io.Writer, name, dir string, purge bool) (bool, error) {
 	_, _ = fmt.Fprintf(out, "Delete project %q?\n", name)
 	_, _ = fmt.Fprintf(out, "  registry entry + state will be removed\n")

@@ -12,12 +12,9 @@ import (
 	"github.com/erzz/boo/internal/state"
 )
 
-// ---------------------------------------------------------------------------
-// Fix 2: Surface purge-delete close failures
-// ---------------------------------------------------------------------------
+// Fix 2: Surface purge-delete close failures.
 
-// makeAppWithFailingClose builds a test app whose Ghostty client returns an
-// error for every osascript call, simulating a CloseWindow failure.
+// makeAppWithFailingClose builds a test app whose Ghostty client errors on every osascript call.
 func makeAppWithFailingClose(t *testing.T) *app {
 	t.Helper()
 	dir := t.TempDir()
@@ -87,10 +84,9 @@ func TestExecuteDelete_PurgeWindowCloseFailure_WarningIsReturned(t *testing.T) {
 	}
 }
 
-// TestExecuteDelete_NoPurge_NoWarning verifies that without --purge no
-// warning is returned (no attempt to close the window is made).
+// TestExecuteDelete_NoPurge_NoWarning: purge=false → no close attempt, no warnings.
 func TestExecuteDelete_NoPurge_NoWarning(t *testing.T) {
-	// Even with a failing Ghostty, purge=false should produce no warnings.
+	// Even with a failing Ghostty client, purge=false must produce no warnings.
 	a := makeAppWithFailingClose(t)
 	dir := t.TempDir()
 	registerProjectForTest(t, a, "proj", dir, "triple")
@@ -118,8 +114,7 @@ func TestExecuteDelete_NoPurge_NoWarning(t *testing.T) {
 	}
 }
 
-// TestExecuteDelete_PurgeWindowCloseSuccess_NoWarning verifies the happy path:
-// when CloseWindow succeeds the warnings slice is empty.
+// TestExecuteDelete_PurgeWindowCloseSuccess_NoWarning: successful CloseWindow → empty warnings.
 func TestExecuteDelete_PurgeWindowCloseSuccess_NoWarning(t *testing.T) {
 	a := makeAppForCmds(t) // default fake returns success for osascript
 	dir := t.TempDir()
@@ -129,8 +124,7 @@ func TestExecuteDelete_PurgeWindowCloseSuccess_NoWarning(t *testing.T) {
 		t.Fatalf("SaveRuntime: %v", err)
 	}
 
-	// The CloseWindow JXA script expects a valid JSON response from the
-	// fake runner, so we need a smarter fake here.
+	// The CloseWindow JXA script expects a valid JSON response; provide one via a smarter fake.
 	fake := booexec.NewFake(func(_ string, _ []string, _ []byte) ([]byte, []byte, error) {
 		return []byte(`{"ok":true}`), nil, nil
 	})
@@ -159,9 +153,7 @@ func TestExecuteDelete_PurgeWindowCloseSuccess_NoWarning(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Fix 3: Multi-word $EDITOR tokeniser
-// ---------------------------------------------------------------------------
+// Fix 3: Multi-word $EDITOR tokeniser.
 
 func TestShsplit(t *testing.T) {
 	tests := []struct {
@@ -214,7 +206,7 @@ func TestShsplit(t *testing.T) {
 			name:    "empty string",
 			input:   "",
 			want:    nil,
-			wantErr: false, // shsplit returns nil,nil for empty; splitEditorCommand errors
+			wantErr: false, // shsplit returns nil,nil; splitEditorCommand errors on empty
 		},
 		{
 			name:    "whitespace only",
@@ -328,8 +320,7 @@ func TestSplitEditorCommand(t *testing.T) {
 	}
 }
 
-// TestBuildEditorCmd_NoEditorSet verifies that buildEditorCmd returns a
-// useful error when neither override nor $EDITOR nor $VISUAL is set.
+// TestBuildEditorCmd_NoEditorSet: no override, no $EDITOR, no $VISUAL → useful error.
 func TestBuildEditorCmd_NoEditorSet(t *testing.T) {
 	t.Setenv("EDITOR", "")
 	t.Setenv("VISUAL", "")
@@ -342,10 +333,7 @@ func TestBuildEditorCmd_NoEditorSet(t *testing.T) {
 	}
 }
 
-// TestBuildEditorCmd_MultiWordEditor verifies that a multi-word editor
-// string (e.g. "code --wait") is correctly split so the resulting *exec.Cmd
-// has the editor binary as Path and flags as separate Args entries — not
-// a single string with spaces in the binary name.
+// TestBuildEditorCmd_MultiWordEditor: "code --wait" splits into binary + flag (not one arg with a space).
 func TestBuildEditorCmd_MultiWordEditor(t *testing.T) {
 	t.Setenv("EDITOR", "code --wait")
 	t.Setenv("VISUAL", "")
@@ -354,8 +342,7 @@ func TestBuildEditorCmd_MultiWordEditor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildEditorCmd: %v", err)
 	}
-	// cmd.Args[0] is conventionally the program name, cmd.Args[1:] are
-	// the arguments. We want ["code", "--wait", "/tmp/foo.yaml"].
+	// cmd.Args[0]=binary, cmd.Args[1:]=flags+file. Want ["code", "--wait", "/tmp/foo.yaml"].
 	if len(cmd.Args) < 3 {
 		t.Fatalf("cmd.Args = %v, want at least 3 entries", cmd.Args)
 	}
@@ -370,8 +357,7 @@ func TestBuildEditorCmd_MultiWordEditor(t *testing.T) {
 	}
 }
 
-// TestBuildEditorCmd_OverrideTakesPrecedence verifies the resolution order:
-// an explicit editorOverride beats $EDITOR.
+// TestBuildEditorCmd_OverrideTakesPrecedence: explicit editorOverride beats $EDITOR.
 func TestBuildEditorCmd_OverrideTakesPrecedence(t *testing.T) {
 	t.Setenv("EDITOR", "vi")
 	t.Setenv("VISUAL", "")

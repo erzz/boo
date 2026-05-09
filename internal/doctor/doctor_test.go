@@ -118,9 +118,8 @@ func TestCheckVersionRange(t *testing.T) {
 
 // ─── ghosttyVersionRangeCheck wiring ─────────────────────────────────────────
 
-// newVersionClient builds a *ghostty.Client whose runner returns versionJSON
-// for every osascript call.  Pass json="" to make the runner return an error
-// instead (simulating a broken/unavailable Ghostty).
+// newVersionClient builds a *ghostty.Client whose runner returns versionJSON for every osascript call.
+// Pass json="" + non-nil runErr to simulate broken/unavailable Ghostty.
 func newVersionClient(versionJSON string, runErr error) *ghostty.Client {
 	fake := booexec.NewFake(func(_ string, _ []string, _ []byte) ([]byte, []byte, error) {
 		if runErr != nil {
@@ -131,14 +130,12 @@ func newVersionClient(versionJSON string, runErr error) *ghostty.Client {
 	return ghostty.New(fake)
 }
 
-// priorWithRunning returns a prior []Result containing a single
-// "ghostty running" entry with the given status.
+// priorWithRunning returns a prior []Result with a "ghostty running" entry at the given status.
 func priorWithRunning(s Status) []Result {
 	return []Result{{Name: "ghostty running", Status: s, Detail: "test stub"}}
 }
 
-// TestGhosttyVersionRangeCheck_SkipPaths covers every skip branch —
-// these must return Skip without ever calling client.Version().
+// TestGhosttyVersionRangeCheck_SkipPaths: every skip branch must return Skip without calling client.Version().
 func TestGhosttyVersionRangeCheck_SkipPaths(t *testing.T) {
 	// A client that panics if its runner is called, so we know the skip
 	// branches truly never reach the network/osascript.
@@ -179,9 +176,7 @@ func TestGhosttyVersionRangeCheck_SkipPaths(t *testing.T) {
 	}
 }
 
-// TestGhosttyVersionRangeCheck_ClientError tests the wiring when the
-// Ghostty client returns an error from Version().  The check must surface
-// a Fail result whose Detail mentions the underlying error.
+// TestGhosttyVersionRangeCheck_ClientError: Ghostty client error → Fail result mentioning the error.
 func TestGhosttyVersionRangeCheck_ClientError(t *testing.T) {
 	client := newVersionClient("", errors.New("osascript: Application can't be found"))
 	check := ghosttyVersionRangeCheck(client)
@@ -195,12 +190,7 @@ func TestGhosttyVersionRangeCheck_ClientError(t *testing.T) {
 	}
 }
 
-// TestGhosttyVersionRangeCheck_VersionRouting table-tests the wiring
-// between client.Version() → checkVersionRange():
-//
-//   - An in-range version must produce OK with the version in Detail.
-//   - A too-old version must produce Fail.
-//   - A >= 2.0 version must produce Warn.
+// TestGhosttyVersionRangeCheck_VersionRouting: in-range → OK; below min → Fail; ≥2.0 → Warn.
 func TestGhosttyVersionRangeCheck_VersionRouting(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -258,9 +248,8 @@ func TestGhosttyVersionRangeCheck_VersionRouting(t *testing.T) {
 	}
 }
 
-// TestGhosttyVersionRangeCheck_CheckNameIsStable verifies that the result
-// Name field is always "ghostty version" regardless of the path taken.
-// Callers (previousResult, AllChecks) rely on this name to locate the result.
+// TestGhosttyVersionRangeCheck_CheckNameIsStable: result Name is always "ghostty version" on every path.
+// previousResult / AllChecks rely on this name to locate the result.
 func TestGhosttyVersionRangeCheck_CheckNameIsStable(t *testing.T) {
 	// Test through every code path.
 	paths := []struct {
@@ -297,18 +286,11 @@ func TestGhosttyVersionRangeCheck_CheckNameIsStable(t *testing.T) {
 
 // ─── AllChecks composition / wiring ──────────────────────────────────────────
 
-// TestAllChecks_IncludesGhosttyVersionCheck is a composition smoke test.
-// It asserts that AllChecks() includes ghosttyVersionRangeCheck in its chain
-// by verifying a Result with Name "ghostty version" appears in the output.
-//
-// The version check is correctly skipped when Ghostty is not installed or not
-// running, so this test only checks the Name field — not the Status. The
-// important invariant is: a future refactor that accidentally removes the call
-// to ghosttyVersionRangeCheck from AllChecks will be caught here.
+// TestAllChecks_IncludesGhosttyVersionCheck: AllChecks() must include ghosttyVersionRangeCheck
+// (catches refactors that accidentally remove it from the chain).
 func TestAllChecks_IncludesGhosttyVersionCheck(t *testing.T) {
-	// Build a client that returns a valid in-range version. Even if earlier
-	// checks (platform, ghostty installed, ghostty running) cause the version
-	// check to be skipped, the Result still carries Name="ghostty version".
+	// Build a client with a valid in-range version. Even if earlier checks skip the version check,
+	// the Result still carries Name="ghostty version".
 	client := newVersionClient(`{"version":"1.3.5"}`, nil)
 
 	checks := AllChecks(client)

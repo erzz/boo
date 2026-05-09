@@ -1,8 +1,6 @@
-// Package ghostty is the only place in boo that talks to Ghostty.
-//
-// All interaction is via JXA (JavaScript for Automation) scripts run through
-// `osascript -l JavaScript`. Cold-start (Ghostty not running) uses
-// `open -na Ghostty.app`. See SPIKE.md for the rationale.
+// Package ghostty is the only place in boo that talks to Ghostty via JXA
+// (JavaScript for Automation) scripts run through `osascript -l JavaScript`.
+// Cold-start uses `open -na Ghostty.app`.
 package ghostty
 
 import (
@@ -77,16 +75,11 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	return out.Version, nil
 }
 
-// OpenWindowParams is the input for OpenWindow. Kept intentionally small for
-// the Phase 0 proof-of-life; real layout support will land in Phase 1+.
+// OpenWindowParams is the input for OpenWindow.
 //
-// Note: there is intentionally no Command field. Ghostty's
-// surface-level `command:` property hard-codes a stripped-down
-// `bash --noprofile --norc -c "exec -l <cmd>"` launcher, which ignores
-// $SHELL, drops the user's PATH, and exits the surface when the
-// command exits. boo composes a command into InitialInput instead so
-// the user's normal default shell starts the way Ghostty would for a
-// vanilla new window — see internal/cli/switch.go::mergeCommandAndInput.
+// No Command field: Ghostty's surface-level command: property uses a stripped
+// bash launcher that ignores $SHELL and drops PATH. boo uses InitialInput
+// instead so the user's default shell starts normally — see switch.go::mergeCommandAndInput.
 type OpenWindowParams struct {
 	WorkingDirectory string            `json:"workingDirectory,omitempty"`
 	InitialInput     string            `json:"initialInput,omitempty"`
@@ -149,12 +142,8 @@ func (c *Client) ProbeAutomation(ctx context.Context) error {
 	return nil
 }
 
-// FrontWindowID returns the ID of Ghostty's currently-front window, or ""
-// if Ghostty isn't running or has no windows. Used by `boo save` (no args)
-// to identify "the project the user is currently in".
-//
-// This deliberately does NOT error when Ghostty is not running — the caller
-// (`boo save`) treats "no front window" as a plain miss, not a fault.
+// FrontWindowID returns the ID of Ghostty's front window, or "" if Ghostty
+// isn't running or has no windows. Does NOT error on "not running".
 func (c *Client) FrontWindowID(ctx context.Context) (string, error) {
 	stdout, stderr, err := c.run(ctx, frontWindowScript, nil)
 	if err != nil {
@@ -226,20 +215,10 @@ func (c *Client) FocusWindow(ctx context.Context, windowID string) error {
 
 // LayoutSplit is a node in a tab's split tree.
 //
-// A node is either a *leaf* (no children, may carry WorkingDirectory /
-// InitialInput / Env) or an *interior* node (Direction is "row"
-// or "column", Children is non-empty, all other fields are ignored).
-//
-// Note on commands: the layout YAML schema has both `command` and
-// `initial_input` fields, but on the wire we collapse them into a
-// single InitialInput string. See the long comment on
-// internal/cli/switch.go::splitToParams for the reasoning.
-//
-// Row means children are laid out left-to-right; column means top-to-bottom.
-// The JXA side walks this tree recursively: it materialises the first leaf
-// it descends into as the seed terminal for the tab, then for each
-// subsequent leaf it splits the most recently materialised sibling in the
-// parent's direction.
+// Either a leaf (no Children; may carry WorkingDirectory/InitialInput/Env) or
+// an interior node (Direction="row"|"column", non-empty Children).
+// command and initial_input from YAML are collapsed into a single InitialInput
+// string on the wire — see switch.go::splitToParams for the reasoning.
 type LayoutSplit struct {
 	// Interior fields.
 	Direction string        `json:"direction,omitempty"`
@@ -251,16 +230,10 @@ type LayoutSplit struct {
 	Env              map[string]string `json:"env,omitempty"`
 }
 
-// LayoutTab is one tab in a layout being rendered. Root is the tab's
-// split tree (leaf for a single-pane tab, interior node otherwise).
-//
-// Name is shipped to JXA but currently ignored on open: Ghostty 1.3.x
-// marks tab/terminal name as read-only in its AppleScript dictionary
-// and the only title-setting action (prompt_surface_title) is
-// interactive. The field is kept (and round-tripped through save) so
-// hand-authored YAML stays the source of truth — when Ghostty exposes
-// a non-interactive title action, open_layout.js will start honouring
-// it without any schema change here.
+// LayoutTab is one tab in a layout being rendered.
+// Name is round-tripped but ignored on open: Ghostty 1.3.x marks tab name
+// as read-only; keep the field so YAML round-trips cleanly until Ghostty
+// exposes a non-interactive title action.
 type LayoutTab struct {
 	Name string      `json:"name,omitempty"`
 	Root LayoutSplit `json:"root"`
@@ -307,11 +280,8 @@ func (c *Client) OpenLayout(ctx context.Context, p OpenLayoutParams) (*OpenWindo
 }
 
 // DescribedTerminal is one terminal surface inside a captured tab.
-//
-// Ghostty's AppleScript dictionary exposes only id, title, and working
-// directory per terminal — split direction, the launching command, and
-// environment are NOT recoverable. Callers (notably `boo save`) must surface
-// that limitation to users.
+// Ghostty exposes only id, title, and working directory per terminal —
+// split direction, command, and env are NOT recoverable via AppleScript.
 type DescribedTerminal struct {
 	ID               string `json:"id"`
 	WorkingDirectory string `json:"workingDirectory"`
@@ -324,9 +294,8 @@ type DescribedTab struct {
 	Terminals []DescribedTerminal `json:"terminals"`
 }
 
-// DescribedWindow is the structure of a live Ghostty window as seen via the
-// AppleScript dictionary. Direction/command/env are not present — see
-// DescribedTerminal.
+// DescribedWindow is a live Ghostty window as seen via the AppleScript dictionary.
+// Direction/command/env are not present — see DescribedTerminal.
 type DescribedWindow struct {
 	Tabs []DescribedTab `json:"tabs"`
 }
@@ -398,16 +367,14 @@ func IsNotRunning(err error) bool {
 // Idempotent: if Ghostty is already up, returns immediately after a quick probe.
 func (c *Client) EnsureRunning(ctx context.Context) error {
 	// Fast path: already responsive.
-	if _, err := c.Version(ctx); err == nil {
-		return nil
+	if _, err := c.Version(ctx); err == nil {		return nil
 	} else if !IsNotRunning(err) {
 		// Some other error (e.g. permissions); surface it.
 		return err
 	}
 
-	// Cold-start. `open -na` always launches a new instance even if one is
-	// hidden; we've already established no instance is responsive, so this is
-	// safe.
+	// Cold-start. `open -na` always launches a new instance; we've already
+	// established no instance is responsive.
 	if _, stderr, err := c.runner.Run(ctx, "open", "-na", "Ghostty.app"); err != nil {
 		return fmt.Errorf("ghostty cold-start: %w (stderr: %s)", err, stderr)
 	}
@@ -432,16 +399,15 @@ func (c *Client) EnsureRunning(ctx context.Context) error {
 	}
 }
 
-// run executes a JXA script via osascript. The script reads its parameters
-// (if any) from stdin as JSON and writes a single JSON object to stdout.
+// run executes a JXA script via osascript. Script reads params from stdin as
+// JSON and writes a single JSON object to stdout.
 func (c *Client) run(ctx context.Context, script string, stdin []byte) ([]byte, []byte, error) {
 	args := []string{"-l", "JavaScript"}
 	if stdin == nil {
-		// Pass the script directly via -e; no stdin needed.
 		args = append(args, "-e", script)
 		return c.runner.Run(ctx, "osascript", args...)
 	}
-	// With stdin, we still pass the script via -e — stdin is reserved for params.
+	// With stdin, pass the script via -e; stdin is reserved for params.
 	args = append(args, "-e", script)
 	return c.runner.RunWithStdin(ctx, stdin, "osascript", args...)
 }

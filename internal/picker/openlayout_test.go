@@ -8,27 +8,23 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// openLayoutModel returns a sized model with onOpenLayout wired to a
-// stub that records the project name it was asked to open and returns
-// a no-op tea.Cmd. Mirrors the editModel / modelWithDelete helpers.
+// openLayoutModel returns a sized model with onOpenLayout stubbed to record calls and return editorFinishedMsg.
+// Mirrors the editModel / modelWithDelete helpers.
 func openLayoutModel(t *testing.T, items ...Item) (*model, *[]string) {
 	t.Helper()
 	m := sizedModel(120, items...)
 	calls := []string{}
 	m.onOpenLayout = func(name string) tea.Cmd {
 		calls = append(calls, name)
-		// Return a cmd that immediately fires editorFinishedMsg{nil}
-		// so we can drive the post-editor refresh path in one update.
+		// Return editorFinishedMsg so the post-editor refresh path is drivable in one update.
 		return func() tea.Msg { return NewEditorFinishedMsg(nil) }
 	}
 	m.refreshItems = func() ([]Item, error) { return items, nil }
 	return m, &calls
 }
 
-// Pressing 'o' on a project Item invokes onOpenLayout with the
-// project's key and dispatches the returned tea.Cmd. The picker stays
-// on screenList — the editor takes over the terminal until it exits,
-// at which point editorFinishedMsg arrives separately.
+// TestList_OPressInvokesOnOpenLayout: 'o' on a project Item calls onOpenLayout with its key
+// and dispatches the returned cmd. Picker stays on screenList (editor handles its own UI).
 func TestList_OPressInvokesOnOpenLayout(t *testing.T) {
 	m, calls := openLayoutModel(t,
 		Item{Key: "alpha", Title: "alpha", Description: "/tmp/a"},
@@ -47,7 +43,7 @@ func TestList_OPressInvokesOnOpenLayout(t *testing.T) {
 	}
 }
 
-// 'o' is dead-keyed when OnOpenLayout is nil — same contract as 'd'/'e'.
+// TestList_OPressNoCallbackIsNoop: 'o' is dead-keyed when OnOpenLayout is nil (same as 'd'/'e').
 func TestList_OPressNoCallbackIsNoop(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/a"})
 	// Deliberately no onOpenLayout.
@@ -57,8 +53,7 @@ func TestList_OPressNoCallbackIsNoop(t *testing.T) {
 	}
 }
 
-// 'o' on the synthetic "+ New project" row is a no-op (no Item to open
-// the layout file for).
+// TestList_OPressOnNewProjectRowIsNoop: 'o' on the synthetic "+ New project" row is a no-op.
 func TestList_OPressOnNewProjectRowIsNoop(t *testing.T) {
 	m, calls := openLayoutModel(t) // empty items → only synthetic row visible
 	_ = pressKey(t, m, "o")
@@ -67,9 +62,7 @@ func TestList_OPressOnNewProjectRowIsNoop(t *testing.T) {
 	}
 }
 
-// If onOpenLayout returns nil (e.g. because the editor wrapper hit a
-// pre-flight failure it surfaced separately), the picker doesn't wedge
-// — it just stays on the list.
+// TestList_OPressNilCmdIsNoop: nil cmd from onOpenLayout → picker stays on screenList, no wedge.
 func TestList_OPressNilCmdIsNoop(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/a"})
 	m.onOpenLayout = func(_ string) tea.Cmd { return nil }
@@ -85,10 +78,7 @@ func TestList_OPressNilCmdIsNoop(t *testing.T) {
 	}
 }
 
-// editorFinishedMsg{nil} triggers a refresh and stays on screenList.
-// This is the success path: the user saved their edits and quit the
-// editor; the picker silently picks up any layout-file changes via
-// the refresh.
+// TestEditorFinishedMsg_SuccessRefreshes: editorFinishedMsg{nil} triggers refresh, stays on screenList.
 func TestEditorFinishedMsg_SuccessRefreshes(t *testing.T) {
 	refreshCalls := 0
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/a"})
@@ -99,8 +89,7 @@ func TestEditorFinishedMsg_SuccessRefreshes(t *testing.T) {
 
 	updated, cmd := m.Update(NewEditorFinishedMsg(nil))
 	mm := updated.(*model)
-	// startEnrich() returns a tea.Cmd that calls RefreshItems asynchronously.
-	// Execute it manually here so the counter is visible synchronously in the test.
+	// startEnrich returns a tea.Cmd that calls RefreshItems async; execute manually to assert synchronously.
 	if cmd != nil {
 		cmd()
 	}
@@ -115,10 +104,8 @@ func TestEditorFinishedMsg_SuccessRefreshes(t *testing.T) {
 	}
 }
 
-// editorFinishedMsg{err} lands on screenError with the editor's error
-// surfaced. Covers two CLI failure modes:
-//   - $EDITOR not set (callback constructs the err itself, never spawns)
-//   - editor process failed/crashed (tea.ExecProcess passes the err through)
+// TestEditorFinishedMsg_ErrorShowsErrorScreen: editorFinishedMsg{err} → screenError with error text.
+// Covers: $EDITOR not set (err constructed before spawn) and editor process crash (err from tea.ExecProcess).
 func TestEditorFinishedMsg_ErrorShowsErrorScreen(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/a"})
 	m.refreshItems = func() ([]Item, error) { return nil, nil }
@@ -131,8 +118,7 @@ func TestEditorFinishedMsg_ErrorShowsErrorScreen(t *testing.T) {
 	if !strings.Contains(mm.errMsg, "vim segfaulted") {
 		t.Errorf("errMsg = %q, want to contain 'vim segfaulted'", mm.errMsg)
 	}
-	// The error message is prefixed with "editor:" so the user knows
-	// which subsystem barked.
+	// errMsg must carry "editor:" prefix so the user knows which subsystem barked.
 	if !strings.Contains(mm.errMsg, "editor:") {
 		t.Errorf("errMsg = %q, want 'editor:' prefix", mm.errMsg)
 	}

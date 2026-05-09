@@ -1,9 +1,6 @@
 // Package exec provides a Runner abstraction over os/exec so that code which
-// shells out (notably the ghostty package and any future git/tooling helpers)
-// can be unit-tested with a fake.
-//
-// Production code in boo MUST go through Runner instead of calling os/exec
-// directly. See AGENTS.md.
+// shells out can be unit-tested with a fake. Production code MUST go through
+// Runner — see AGENTS.md for documented exceptions.
 package exec
 
 import (

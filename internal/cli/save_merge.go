@@ -6,62 +6,21 @@ import (
 	"github.com/erzz/boo/internal/layout"
 )
 
-// mergeForSave folds invisible-but-stable fields from prev into the
-// flat captured layout, returning the layout to actually save and a
-// list of human-readable notes about prev data that could NOT be
-// carried forward.
+// mergeForSave folds invisible-but-stable fields from prev into the captured
+// layout, returning the layout to save and a list of notes about data that
+// could NOT be carried forward.
 //
-// Why a merge exists at all
-// -------------------------
-// Ghostty's AppleScript API doesn't tell us the launch command, env, or
-// initial_input of a live terminal — it only exposes id / title /
-// working directory. It also returns terminals as a flat list per tab,
-// so we lose any nested split tree on capture. A naive "snapshot the
-// live window" save therefore wipes those fields AND flattens the tree
-// on every re-save, which makes `boo save` hostile to anyone with a
-// hand-authored layout.
+// Why: Ghostty's AppleScript API exposes only id/title/cwd per terminal — not
+// command, env, initial_input, or the split tree shape. A naive capture wipes
+// those fields on every re-save. Since they exist in the previous layout file,
+// we carry them forward by leaf position when the captured leaf count matches.
 //
-// But we already have those fields (and the tree shape) on disk in the
-// previous layout file. As long as the captured leaf count matches the
-// previous tab's leaf count, we can keep prev's tree shape and merge
-// invisibles by leaf order. Cwd we always take from capture, because
-// cwd is the one thing that legitimately changes when the user `cd`-s
-// around.
-//
-// Match policy (per tab)
-// ----------------------
-// Same leaf count as prev → keep prev's tree shape verbatim, walk it
-// in left-to-right depth-first leaf order, and zip captured cwds onto
-// each leaf. Command / env / initial_input are carried forward from
-// prev. This is the lossless path: hand-authored trees survive
-// re-saves intact.
-//
-// Captured leaf count differs from prev → we cannot keep the tree
-// shape (the schema requires interior nodes to have exactly 2
-// children, so an N-leaf tab from capture has to be rebuilt). The
-// merge produces a *flat* tree (single leaf if N==1, otherwise a
-// right-leaning chain of row splits), zips captured cwds onto each
-// leaf, and merges invisibles by leaf index up to min(prevLeaves,
-// capturedLeaves). The dropped tail of prev is reported as lossy if
-// it carried command / env / initial_input.
-//
-// Tab count changes are handled at the tab level: merge tabs that
-// align by index up to min(len). Extra captured tabs are taken
-// as-is; dropped prev tabs are reported as lossy if they carried
-// unrecoverable data.
-//
-// Position-based matching is intentionally simple. A user who
-// reorders panes within a tab will see their command move to the
-// wrong leaf — but they'll see this in the diff (cwds and commands
-// now mismatched) before approving the save. The alternative
-// (refusing to merge the moment counts don't match) would revert to
-// the lossy "every re-save erases everything" behaviour we're
-// fixing.
+// Match policy (per tab):
+//   - Same leaf count as prev → keep prev's tree shape, zip captured cwds onto leaves. Lossless.
+//   - Different count → use captured's flat tree, merge invisibles by index up to min(counts).
+//     Dropped prev leaves with unrecoverable data are reported as lost.
 func mergeForSave(prev, captured layout.Layout) (layout.Layout, []string) {
-	// Captured is the source of truth for tab list, name, and per-leaf
-	// cwd. The captured layout from capturedToLayout is always flat
-	// (one leaf per terminal Ghostty reported, as a single leaf or a
-	// right-leaning row chain).
+	// Captured is the source of truth for tab list, name, and per-leaf cwd.
 	merged := layout.Layout{Name: captured.Name}
 	merged.Tabs = make([]layout.Tab, len(captured.Tabs))
 
@@ -73,13 +32,11 @@ func mergeForSave(prev, captured layout.Layout) (layout.Layout, []string) {
 		merged.Tabs[i] = mergedTab
 		lost = append(lost, tabLost...)
 	}
-	// Captured tabs beyond what prev had: nothing to merge, take as-is
-	// (deep-copied so callers don't share state with `captured`).
+	// Extra captured tabs (beyond prev): take as-is.
 	for i := commonTabs; i < len(captured.Tabs); i++ {
 		merged.Tabs[i] = copyTab(captured.Tabs[i])
 	}
-	// Prev tabs beyond what captured has: dropped entirely. Report any
-	// unrecoverable leaf contents.
+	// Dropped prev tabs: report unrecoverable leaf contents.
 	for i := commonTabs; i < len(prev.Tabs); i++ {
 		for j, leaf := range collectLeaves(prev.Tabs[i].Root) {
 			for _, r := range leafLossReasons(i, prev.Tabs[i].Name, j, leaf) {
@@ -91,19 +48,9 @@ func mergeForSave(prev, captured layout.Layout) (layout.Layout, []string) {
 	return merged, lost
 }
 
-// mergeTab folds prev's invisibles into the captured tab. capturedTab
-// is the flat result from capturedToLayout (a leaf or right-chain row).
-//
-// Two cases by leaf count:
-//
-//   - Same count → keep prev's tree shape; walk both in left-to-right
-//     leaf order; zip captured cwd onto each leaf, carry forward
-//     invisibles from prev. Lossless.
-//   - Different count → keep capturedTab's flat shape; merge invisibles
-//     by leaf index up to min; report dropped tail leaves as lossy.
-//
-// Tab name: prefer captured (Ghostty usually returns it); fall back to
-// prev when captured didn't.
+// mergeTab folds prev's invisibles into a captured tab.
+// Same leaf count → keep prev's tree shape, zip captured cwds, carry forward invisibles (lossless).
+// Different count → keep captured's flat shape, merge by index, report dropped tail.
 func mergeTab(prev, captured layout.Tab) (layout.Tab, []string) {
 	prevLeaves := collectLeaves(prev.Root)
 	capLeaves := collectLeaves(captured.Root)
@@ -116,8 +63,7 @@ func mergeTab(prev, captured layout.Tab) (layout.Tab, []string) {
 	var lost []string
 
 	if len(prevLeaves) == len(capLeaves) {
-		// Lossless path: clone prev's tree, then overlay captured cwds
-		// and prev invisibles by leaf order.
+		// Lossless: clone prev's tree, overlay captured cwds by leaf order.
 		out.Root = mergePreservingShape(prev.Root, capLeaves, &[]int{0})
 		return out, lost
 	}
@@ -135,8 +81,7 @@ func mergeTab(prev, captured layout.Tab) (layout.Tab, []string) {
 	out.Root = buildFlatRoot(mergedLeaves)
 
 	// Dropped tail of prev: report unrecoverable data.
-	for i := common; i < len(prevLeaves); i++ {
-		for _, r := range leafLossReasons(0, captured.Name, i, prevLeaves[i]) {
+	for i := common; i < len(prevLeaves); i++ {		for _, r := range leafLossReasons(0, captured.Name, i, prevLeaves[i]) {
 			lost = append(lost, fmt.Sprintf("dropped: %s", r))
 		}
 	}
@@ -144,20 +89,14 @@ func mergeTab(prev, captured layout.Tab) (layout.Tab, []string) {
 	return out, lost
 }
 
-// mergePreservingShape walks prev's tree, returning a clone where every
-// leaf is replaced by the next captured leaf's cwd combined with prev
-// leaf's invisibles.
-//
-// `cursor` is a single-element slice used as a mutable counter — Go
-// passes ints by value, so the recursion needs a shared writable cell
-// to advance through capLeaves in depth-first order. This is the same
-// pattern stdlib uses for tree-walking iterators.
+// mergePreservingShape clones prev's tree replacing each leaf's cwd with the
+// next captured leaf's cwd, then layers prev's invisibles on top.
+// cursor is a shared counter (single-element slice) for DFS traversal.
 func mergePreservingShape(prevNode layout.Split, capLeaves []layout.Split, cursor *[]int) layout.Split {
 	if prevNode.IsLeaf() {
 		idx := (*cursor)[0]
 		(*cursor)[0] = idx + 1
-		// Start from the captured leaf (so cwd is fresh), then layer
-		// prev's invisibles on top.
+		// Start from captured leaf (fresh cwd), then layer prev's invisibles.
 		merged := copyLeaf(capLeaves[idx])
 		adoptInvisibles(&merged, prevNode)
 		return merged
@@ -172,15 +111,9 @@ func mergePreservingShape(prevNode layout.Split, capLeaves []layout.Split, curso
 	return out
 }
 
-// adoptInvisibles copies command / env / initial_input from prev into
-// dst, but only when dst doesn't already have a value of its own. The
-// captured layout never sets these (they're invisible to the API), so
-// in practice this always copies — but the "only if empty" rule keeps
-// the function safe to call from contexts where dst might have been
-// pre-populated (e.g. a future feature where capture learns to read
-// some of these from a sidecar file).
-//
-// Cwd is intentionally NOT copied: capture is the authority on cwd.
+// adoptInvisibles copies command/env/initial_input from prev into dst when
+// dst doesn't already have a value. Cwd is intentionally NOT copied — capture
+// is the authority on cwd.
 func adoptInvisibles(dst *layout.Split, prev layout.Split) {
 	if dst.Command == "" && prev.Command != "" {
 		dst.Command = prev.Command
@@ -189,8 +122,7 @@ func adoptInvisibles(dst *layout.Split, prev layout.Split) {
 		dst.InitialInput = prev.InitialInput
 	}
 	if len(dst.Env) == 0 && len(prev.Env) > 0 {
-		// Copy the map so a later mutation of merged doesn't leak
-		// back into the previous layout value.
+		// Copy the map so a later mutation doesn't alias the previous layout value.
 		dst.Env = make(map[string]string, len(prev.Env))
 		for k, v := range prev.Env {
 			dst.Env[k] = v
@@ -198,23 +130,10 @@ func adoptInvisibles(dst *layout.Split, prev layout.Split) {
 	}
 }
 
-// buildFlatRoot constructs the canonical flat tree representation of N
-// leaves in left-to-right order:
-//
-//   - N == 0 → an empty leaf (defensive; capturedToLayout shouldn't
-//     produce a tab with zero leaves, but if it does we emit a leaf so
-//     the layout still validates).
-//   - N == 1 → the leaf itself as the root.
-//   - N >= 2 → a right-chain of row splits:
-//     row(leaves[0], row(leaves[1], row(leaves[2], ...)))
-//
-// Why right-chain rather than a balanced tree: the schema requires
-// exactly 2 children per interior node, so 3+ leaves must nest. A
-// right-chain matches the visual shape Ghostty produces when the user
-// hits Cmd-D N-1 times in a row (each split halves the previously-new
-// pane), which is the most likely scenario when capture sees N>=3
-// terminals it didn't author. A balanced tree would silently change
-// pane proportions on re-open.
+// buildFlatRoot builds the canonical flat tree for N leaves:
+// N==0 → empty leaf; N==1 → the leaf itself; N≥2 → right-leaning row chain.
+// Right-chain matches the shape Ghostty produces on Cmd-D×(N-1), matching
+// user expectation and avoiding silent pane-proportion changes on re-open.
 func buildFlatRoot(leaves []layout.Split) layout.Split {
 	if len(leaves) == 0 {
 		return layout.Split{}
@@ -250,8 +169,7 @@ func copySplit(s layout.Split) layout.Split {
 	return out
 }
 
-// copyLeaf clones a single leaf split, copying the Env map so callers
-// can mutate the result without aliasing the source.
+// copyLeaf clones a single leaf split, copying the Env map to avoid aliasing.
 func copyLeaf(s layout.Split) layout.Split {
 	out := s
 	out.Children = nil

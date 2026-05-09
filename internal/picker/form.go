@@ -8,9 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// FormDefaults is what the caller passes in to pre-populate the form.
-// All fields optional. AlreadyRegisteredAs, if non-empty, causes the model
-// to render a "this dir is already registered" prompt before the form.
+// FormDefaults pre-populates the new-project form. All fields optional.
+// AlreadyRegisteredAs triggers a "dir already registered" interstitial when non-empty.
 type FormDefaults struct {
 	Name                string
 	Dir                 string
@@ -19,9 +18,8 @@ type FormDefaults struct {
 	GitRemote           string // informational only; rendered above the form
 	AlreadyRegisteredAs string
 	// DefaultLayout is the layout name used when Template is empty.
-	// Empty means "use the package's hardcoded fallback ('triple')".
-	// Wired by the CLI from user config so a user who sets
-	// default_layout in config.yaml sees that layout preselected.
+	// Empty falls back to the package hardcoded default ("triple").
+	// CLI threads user config here so the user's default_layout is pre-selected.
 	DefaultLayout string
 }
 
@@ -50,28 +48,13 @@ func (f formField) label() string {
 	return ""
 }
 
-// formModel is the new-project sub-screen. It owns four text inputs plus
-// a focus index.
+// formModel is the new-project sub-screen: four text inputs plus a focus index.
 //
-// The Layout template field has two modes:
-//   - Free-text input (default, for tests and any caller that doesn't
-//     supply Options.LayoutNames). The textinput at inputs[fieldTemplate]
-//     is the source of truth.
-//   - Cycler over a known list (when layoutNames is non-empty). The
-//     textinput at inputs[fieldTemplate] is bypassed entirely; layoutIdx
-//     points into layoutNames. ←/→ (and h/l) cycle when the field is
-//     focused. The textinput's value is kept in sync as a fallback so
-//     collect() can read it the same way in both modes.
+// Layout template field has two modes: free-text (default, for tests / callers without LayoutNames)
+// and cycler over a known list (when layoutNames is non-empty; ←/→ cycle when focused).
 //
-// Edit mode (set via setEditMode) re-purposes the same widget for
-// editing an existing project. Differences:
-//   - Title says "Edit project" instead of "Register a new project".
-//   - The "Clone from URL" field is hidden — you can't change a
-//     registered project's clone source after the fact, and showing
-//     an empty unrelated field would be confusing. focusNext/focusPrev
-//     skip it; view() doesn't render it.
-//   - Submit produces an EditIntent (with the original name carried
-//     through editOldName) instead of a NewProjectIntent.
+// Edit mode (setEditMode) re-purposes the widget for editing an existing project:
+// title changes, the Clone from URL field is hidden, and submit emits EditIntent (not NewProjectIntent).
 type formModel struct {
 	inputs    []textinput.Model
 	focus     formField
@@ -79,39 +62,23 @@ type formModel struct {
 	width     int
 	err       string
 	theme     Theme
-	// preview, if set, is called with the current value of the Layout
-	// template field; the returned string is shown below the form. See
-	// Options.PreviewTemplate for the rationale (kept as a callback so
-	// the picker package doesn't import internal/layout).
+	// preview, if set, is called with the current template name; returned string shown below the form.
+	// Callback so the picker package doesn't import internal/layout.
 	preview func(name string) string
 
-	// layoutNames is the cycler's list of template names. Empty means
-	// the Layout field stays a plain text input. See setLayoutNames.
+	// layoutNames is the cycler's list. Empty keeps Layout as a plain text input.
 	layoutNames []string
 	layoutIdx   int
 
-	// defaultLayout is the template name to use when the Layout field
-	// is left blank at submit time and when the preview is requested
-	// without an explicit name. Set from FormDefaults.DefaultLayout
-	// (which the CLI populates from user config), falling back to
-	// hardcodedFallbackLayout.
+	// defaultLayout is the template used when Layout is blank at submit; set from FormDefaults.DefaultLayout.
 	defaultLayout string
 
-	// editMode + editOldName turn this widget into an "edit existing
-	// project" form. editOldName is the project's original key — the
-	// EditIntent emitted on submit ships it as OldName so the CLI can
-	// distinguish a rename from a no-op. Empty editOldName with
-	// editMode true would be a programming error; we don't enforce it
-	// here because setEditMode is the only entry point.
+	// editMode + editOldName: edit-existing-project form. editOldName is the project's original key.
 	editMode    bool
 	editOldName string
 }
 
-// hardcodedFallbackLayout is the layout name the form uses when no
-// other source (caller-supplied DefaultLayout or user-typed Template)
-// has provided one. Last-resort fallback only — `boo` users who want
-// to change the default should set `default_layout:` in config.yaml,
-// which the CLI threads through FormDefaults.DefaultLayout.
+// hardcodedFallbackLayout is the last-resort default layout when no caller-supplied or user-config default exists.
 const hardcodedFallbackLayout = "triple"
 
 // effectiveDefault returns the layout name the form should treat as
@@ -165,14 +132,8 @@ func (f *formModel) setSize(width int) {
 	}
 }
 
-// setLayoutNames switches the Layout template field into cycler mode
-// over the supplied list. The currently-typed value (from defaults or
-// fallback text input) is preserved if it matches one of the names;
-// otherwise the cycler starts at index 0 and the input value is
-// updated to match.
-//
-// Calling with an empty / nil slice puts the field back into free-text
-// mode.
+// setLayoutNames switches the Layout field into cycler mode over names, preserving the current value if present.
+// Empty/nil names reverts to free-text mode.
 func (f *formModel) setLayoutNames(names []string) {
 	if len(names) == 0 {
 		f.layoutNames = nil
@@ -188,9 +149,7 @@ func (f *formModel) setLayoutNames(names []string) {
 			break
 		}
 	}
-	// Keep the underlying textinput in sync so collect() reads the
-	// same value the cycler is showing — single source of truth at
-	// submit time.
+	// Keep the underlying textinput in sync — single source of truth at submit time.
 	f.inputs[fieldTemplate].SetValue(names[f.layoutIdx])
 }
 
@@ -209,14 +168,8 @@ func (f *formModel) cycleLayout(delta int) {
 	f.inputs[fieldTemplate].SetValue(f.layoutNames[f.layoutIdx])
 }
 
-// setEditMode flips the form into "edit existing project" mode. The
-// caller passes the project's current key — preserved so the emitted
-// EditIntent ships OldName even if the user changed Name in the form.
-//
-// Pre-populating the input values themselves is the caller's job (via
-// FormDefaults at construction time); this method only sets the flags
-// that change form behaviour. Calling with editMode=false reverts to
-// new-project semantics.
+// setEditMode flips the form into edit-existing-project mode. Pre-populating inputs is the caller's job.
+// oldName is carried through as EditIntent.OldName to distinguish renames from no-ops.
 func (f *formModel) setEditMode(editMode bool, oldName string) {
 	f.editMode = editMode
 	f.editOldName = oldName
@@ -228,14 +181,8 @@ func (f *formModel) fieldHidden(field formField) bool {
 	return f.editMode && field == fieldFrom
 }
 
-// Update returns (next model, cmd, submitted, intent, cancelled).
-//   - submitted=true: user pressed enter on the last field with valid content.
-//   - cancelled=true: user pressed esc.
-//   - both false: still editing.
-//
-// `intent` is nil unless submitted=true. Its concrete type is
-// *NewProjectIntent for new-project mode and *EditIntent for edit mode.
-// Callers type-switch.
+// Update returns (cmd, submitted, intent, cancelled). submitted=true means the user pressed enter/ctrl-s
+// with valid content; intent is non-nil iff submitted. Concrete type: *NewProjectIntent or *EditIntent.
 func (f *formModel) update(msg tea.Msg) (tea.Cmd, bool, Intent, bool) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -258,11 +205,7 @@ func (f *formModel) update(msg tea.Msg) (tea.Cmd, bool, Intent, bool) {
 			f.focusNext()
 			return nil, false, nil, false
 		case "left", "h":
-			// In cycler mode, ←/h cycles backwards through the layout
-			// list when the Layout field is focused. Outside cycler
-			// mode (or on other fields) we fall through and let the
-			// textinput handle the key — '←' moves the cursor inside
-			// the input, 'h' inserts the literal character.
+			// Cycler mode: ←/h cycles backwards. Outside cycler mode, fall through to textinput.
 			if f.focus == fieldTemplate && f.cyclerActive() {
 				f.cycleLayout(-1)
 				return nil, false, nil, false
@@ -275,10 +218,8 @@ func (f *formModel) update(msg tea.Msg) (tea.Cmd, bool, Intent, bool) {
 		}
 	}
 
-	// In cycler mode, the Layout field's textinput is fully bypassed —
-	// we don't want characters typed into it to silently override the
-	// cycler's value. All other fields (and the Layout field in
-	// fallback free-text mode) keep the normal textinput behaviour.
+	// In cycler mode, the Layout field's textinput is fully bypassed — typed chars
+	// would silently override the cycler's value.
 	if f.focus == fieldTemplate && f.cyclerActive() {
 		return nil, false, nil, false
 	}
@@ -295,9 +236,7 @@ func (f *formModel) tryCommit() (tea.Cmd, bool, Intent, bool) {
 			f.err = err.Error()
 			return nil, false, nil, false
 		}
-		// Return the value, not the pointer: the Intent interface is
-		// implemented by the value type (see isIntent receivers in
-		// picker.go), so a *EditIntent would not satisfy it.
+		// Return value, not pointer — Intent interface is implemented by the value type.
 		return nil, true, *intent, false
 	}
 	intent, err := f.collect()
@@ -335,14 +274,8 @@ func (f *formModel) collect() (*NewProjectIntent, error) {
 	}, nil
 }
 
-// collectEdit builds an EditIntent from the current input values.
-// Used in edit mode. From is intentionally ignored (it's hidden) — you
-// can't change a registered project's clone source.
-//
-// Validation is intentionally lighter than collect(): an empty Name is
-// rejected (you'd lose the project), but an unchanged Dir/Template is
-// fine — the CLI side is the one that decides whether anything actually
-// needs writing. Keeps the form unopinionated.
+// collectEdit builds an EditIntent from current inputs (edit mode). From is ignored (hidden).
+// Validation is lighter than collect(): empty Dir is rejected, but unchanged Dir/Template is fine.
 func (f *formModel) collectEdit() (*EditIntent, error) {
 	name := strings.TrimSpace(f.inputs[fieldName].Value())
 	dir := strings.TrimSpace(f.inputs[fieldDir].Value())
@@ -367,9 +300,7 @@ func (f *formModel) collectEdit() (*EditIntent, error) {
 	}, nil
 }
 
-// focusNext / focusPrev wrap around the visible fields, skipping any
-// that fieldHidden() reports — keeps tab/shift-tab/enter navigation
-// from "landing" on an invisible field in edit mode.
+// focusNext / focusPrev wrap around visible fields, skipping fieldHidden() fields.
 func (f *formModel) focusNext() {
 	f.inputs[f.focus].Blur()
 	for i := 0; i < int(numFormFields); i++ {
@@ -392,9 +323,7 @@ func (f *formModel) focusPrev() {
 	f.inputs[f.focus].Focus()
 }
 
-// lastVisibleField returns the highest field index that fieldHidden
-// reports as visible. Used so enter on the last *visible* field
-// commits, even when later fields are hidden in edit mode.
+// lastVisibleField returns the highest visible field index, so enter on the last visible field commits.
 func (f *formModel) lastVisibleField() formField {
 	for i := int(numFormFields) - 1; i >= 0; i-- {
 		ff := formField(i)
@@ -405,14 +334,8 @@ func (f *formModel) lastVisibleField() formField {
 	return fieldName // unreachable; nothing is hidden by default
 }
 
-// renderCycler draws the Layout field as `‹  <name>  ›` when the
-// cycler is active. The arrows are styled subtly when the field is
-// not focused so the affordance is unambiguous when the user lands
-// on it.
-//
-// Width follows the same rule as the other inputs (width-6 with a
-// 20-column floor), so the cycler row lines up vertically with the
-// text inputs above it.
+// renderCycler draws the Layout field as `‹  <name>  ›`. Arrows are styled based on focus.
+// Width matches other inputs (width-6, floor 20) so the cycler row aligns vertically.
 func (f *formModel) renderCycler() string {
 	name := ""
 	if f.layoutIdx < len(f.layoutNames) {
@@ -457,9 +380,7 @@ func (f *formModel) view() string {
 		}
 		b.WriteString(label)
 		b.WriteString("\n")
-		// Layout field gets the cycler view when active — every other
-		// field, and the layout field in fallback mode, uses the
-		// underlying textinput.
+		// Layout field: cycler view when active; textinput otherwise.
 		if formField(i) == fieldTemplate && f.cyclerActive() {
 			b.WriteString(f.renderCycler())
 		} else {
@@ -479,11 +400,7 @@ func (f *formModel) view() string {
 	}
 	b.WriteString(f.theme.FormHelp.Render(help))
 
-	// Layout preview, if a renderer was wired in. We render below the
-	// form (option B from the design discussion) rather than side-by-side
-	// because (a) it scales gracefully at narrow widths and (b) it keeps
-	// the form layout stable as the preview height changes — the user's
-	// focus and inputs don't shift around as they type a template name.
+	// Layout preview rendered below the form — scales at narrow widths; form layout stays stable.
 	if f.preview != nil {
 		tpl := strings.TrimSpace(f.inputs[fieldTemplate].Value())
 		if tpl == "" {

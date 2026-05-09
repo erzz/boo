@@ -1,21 +1,8 @@
 package cli
 
-// cobra_test.go exercises the cobra wiring layer — flag parsing,
-// RunE dispatch, and the interaction between cobra flags and the
-// internal helper functions.  These tests sit at the boundary between
-// the cobra command tree and the app helpers; they complement the
-// direct-helper tests elsewhere in the package.
-//
-// Strategy: each command under test is constructed via its *WithApp /
-// *WithRunner variant so a fake *app can be injected.  This keeps
-// state isolated without BOO_HOME pollution while still exercising:
-//   - flag registration (the flags must exist on the cobra.Command)
-//   - flag parsing (cobra parses the args slice)
-//   - the RunE path through to internal helpers
-//
-// The tests are deliberately narrow: they verify the cobra path produces
-// the right side-effects or errors, not the full business logic (which
-// is covered by the direct-helper tests).
+// cobra_test.go exercises cobra wiring: flag parsing, RunE dispatch, flag-to-helper interaction.
+// Commands are constructed via *WithApp / *WithRunner variants to inject a fake *app.
+// Tests are narrow: cobra path → correct side-effects / errors; business logic tested elsewhere.
 
 import (
 	"bytes"
@@ -37,9 +24,7 @@ import (
 
 // ─── helper ───────────────────────────────────────────────────────────────────
 
-// executeCobraCmd wires stdout/stderr capture onto cmd, sets the given args,
-// and executes it with a background context.  Returns the captured output
-// and any error returned by Execute.
+// executeCobraCmd wires stdout/stderr capture onto cmd and executes with a background context.
 func executeCobraCmd(t *testing.T, cmd *cobra.Command, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	var outBuf, errBuf bytes.Buffer
@@ -50,10 +35,7 @@ func executeCobraCmd(t *testing.T, cmd *cobra.Command, args ...string) (stdout, 
 	return outBuf.String(), errBuf.String(), err
 }
 
-// makeAppWithFakeGit returns a test *app whose Git cloner is backed by the
-// given respond function.  Every git clone call will be intercepted.
-// The Ghostty client is wired to a do-nothing fake so any incidental
-// Ghostty calls don't panic.
+// makeAppWithFakeGit returns a test *app with a fake git runner intercepting all clone calls.
 func makeAppWithFakeGit(t *testing.T, respond func(name string, args []string, stdin []byte) ([]byte, []byte, error)) *app {
 	t.Helper()
 	a := makeAppForCmds(t)
@@ -64,9 +46,8 @@ func makeAppWithFakeGit(t *testing.T, respond func(name string, args []string, s
 
 // ─── boo config path ──────────────────────────────────────────────────────────
 
-// TestCobra_ConfigPath_PrintsConfigFilePath verifies the cobra flag-parsing
-// and RunE for `boo config path`.  The command must not call newApp() so
-// it succeeds even when config is absent.
+// TestCobra_ConfigPath_PrintsConfigFilePath verifies `boo config path` prints the config file path
+// without calling newApp() (so it succeeds even when config is absent).
 func TestCobra_ConfigPath_PrintsConfigFilePath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("BOO_HOME", root)
@@ -84,10 +65,8 @@ func TestCobra_ConfigPath_PrintsConfigFilePath(t *testing.T) {
 	}
 }
 
-// TestCobra_ConfigPath_SucceedsWithBrokenConfig is the regression test for
-// "boo config path must not fail when config.yaml is malformed."  The command
-// deliberately bypasses newApp() / config.Load so users can find and fix the
-// file path even when parsing fails.
+// TestCobra_ConfigPath_SucceedsWithBrokenConfig: regression — `boo config path` must not fail
+// when config.yaml is malformed (it bypasses newApp() / config.Load by design).
 func TestCobra_ConfigPath_SucceedsWithBrokenConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("BOO_HOME", root)
@@ -107,11 +86,8 @@ func TestCobra_ConfigPath_SucceedsWithBrokenConfig(t *testing.T) {
 	}
 }
 
-// TestCobra_ConfigEdit_SucceedsWithBrokenConfig is the regression test for
-// "boo config edit must not fail when config.yaml is malformed."  The fix
-// was to make the command bypass newApp() and use state.Default() directly.
-// EDITOR is set to "true" (a POSIX utility that exits 0 without any I/O) so
-// the test doesn't open a real editor.
+// TestCobra_ConfigEdit_SucceedsWithBrokenConfig: regression — `boo config edit` must not fail
+// when config.yaml is malformed (bypasses newApp()). EDITOR=true exits 0 without I/O.
 func TestCobra_ConfigEdit_SucceedsWithBrokenConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("BOO_HOME", root)
@@ -137,17 +113,9 @@ func TestCobra_ConfigEdit_SucceedsWithBrokenConfig(t *testing.T) {
 
 // ─── boo new ──────────────────────────────────────────────────────────────────
 
-// TestCobra_New_FromFlag_CloneDestinationNotCwd is the regression test for
-// "boo new --from <url> was cloning into cwd instead of a subdirectory".
-//
-// The bug: when --from is set and --dir/--into are absent, buildNewProjectDefaults
-// used to set Dir to cwd.  The fix derives Dir from the URL.
-//
-// We inject a fake git runner that records what git clone was called with
-// and returns an error (no network needed).  The test verifies:
-//  1. The clone was attempted (not an earlier validation error).
-//  2. The clone destination is NOT cwd.
-//  3. The clone destination ends with the repo name from the URL.
+// TestCobra_New_FromFlag_CloneDestinationNotCwd: regression — `boo new --from <url>` was cloning
+// into cwd instead of a URL-derived subdirectory. Fake git runner records the clone destination.
+// Verifies: (1) clone was attempted, (2) destination != cwd, (3) destination ends with repo name.
 func TestCobra_New_FromFlag_CloneDestinationNotCwd(t *testing.T) {
 	cwd, _ := os.Getwd()
 
@@ -190,9 +158,7 @@ func TestCobra_New_FromFlag_CloneDestinationNotCwd(t *testing.T) {
 	}
 }
 
-// TestCobra_New_FromFlag_WithExplicitDir verifies that --from + --dir
-// uses the explicit --dir as the clone destination rather than deriving
-// from the URL.  Covers the separate code path in newNewCmdWithApp.
+// TestCobra_New_FromFlag_WithExplicitDir verifies --from + --dir uses explicit --dir as clone destination.
 func TestCobra_New_FromFlag_WithExplicitDir(t *testing.T) {
 	target := t.TempDir()
 
@@ -228,9 +194,7 @@ func TestCobra_New_FromFlag_WithExplicitDir(t *testing.T) {
 
 // ─── boo delete ───────────────────────────────────────────────────────────────
 
-// TestCobra_Delete_Force_RemovesProject tests the cobra path for
-// `boo delete <name> --force`.  The project is pre-registered in the
-// temp state, and we verify it's gone after the command runs.
+// TestCobra_Delete_Force_RemovesProject tests the cobra path for `boo delete <name> --force`.
 func TestCobra_Delete_Force_RemovesProject(t *testing.T) {
 	a := makeAppForCmds(t)
 	dir := t.TempDir()
@@ -257,8 +221,7 @@ func TestCobra_Delete_Force_RemovesProject(t *testing.T) {
 	}
 }
 
-// TestCobra_Delete_UnknownProject_Errors verifies that deleting a project
-// that isn't registered returns a clear "not found" error.
+// TestCobra_Delete_UnknownProject_Errors verifies a clear "not found" error for unknown projects.
 func TestCobra_Delete_UnknownProject_Errors(t *testing.T) {
 	a := makeAppForCmds(t)
 
@@ -272,9 +235,7 @@ func TestCobra_Delete_UnknownProject_Errors(t *testing.T) {
 	}
 }
 
-// TestCobra_Delete_Purge_CallsGhosttyCloseWindow verifies that
-// `boo delete <name> --purge --force` triggers a Ghostty close-window call
-// when the project has a saved runtime window ID.
+// TestCobra_Delete_Purge_CallsGhosttyCloseWindow verifies --purge --force triggers a Ghostty close-window call.
 func TestCobra_Delete_Purge_CallsGhosttyCloseWindow(t *testing.T) {
 	const wantWindowID = "win-abc-123"
 
@@ -314,8 +275,7 @@ func TestCobra_Delete_Purge_CallsGhosttyCloseWindow(t *testing.T) {
 
 // ─── boo save ────────────────────────────────────────────────────────────────
 
-// TestCobra_Save_UnknownProject_Errors verifies that
-// `boo save <unknown>` returns a clear "not found" error through the cobra path.
+// TestCobra_Save_UnknownProject_Errors verifies `boo save <unknown>` returns a "not found" error.
 func TestCobra_Save_UnknownProject_Errors(t *testing.T) {
 	a := makeAppForCmds(t)
 
@@ -329,9 +289,7 @@ func TestCobra_Save_UnknownProject_Errors(t *testing.T) {
 	}
 }
 
-// TestCobra_Save_KnownProjectNoLiveWindow_Errors verifies that
-// `boo save <name>` returns an actionable error when the project has no
-// live window recorded in its runtime state file.
+// TestCobra_Save_KnownProjectNoLiveWindow_Errors verifies `boo save <name>` errors when project has no live window.
 func TestCobra_Save_KnownProjectNoLiveWindow_Errors(t *testing.T) {
 	a := makeAppForCmds(t)
 	dir := t.TempDir()
@@ -350,14 +308,8 @@ func TestCobra_Save_KnownProjectNoLiveWindow_Errors(t *testing.T) {
 
 // ─── boo doctor ──────────────────────────────────────────────────────────────
 
-// TestCobra_Doctor_Smoke verifies that the doctor command runs its full cobra
-// path (flag registration, RunE, check execution, result rendering) without
-// panicking.  The fake runner returns plausible Ghostty JSON responses so
-// the Ghostty-specific checks that use the Runner don't produce unexpected results.
-//
-// checkGhosttyInstalled uses exec.LookPath (not the Runner), so it may
-// return FAIL if Ghostty isn't installed in the test environment.  That's
-// expected: we only assert that the command produces output and doesn't panic.
+// TestCobra_Doctor_Smoke verifies the doctor command runs its full cobra path without panicking.
+// Ghostty checks that use exec.LookPath (not Runner) may return FAIL in test envs — that's expected.
 func TestCobra_Doctor_Smoke(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("BOO_HOME", root)

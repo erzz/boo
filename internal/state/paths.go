@@ -1,16 +1,6 @@
 // Package state owns boo's on-disk paths and atomic file IO.
-//
-// All persistent files boo writes go through this package. Everything
-// lives under a single config root:
-//
-//	$XDG_CONFIG_HOME/boo/   (default ~/.config/boo)
-//	  config.yaml           — global config
-//	  layouts/*.yaml        — user-defined shared layout templates
-//	  themes/*.yaml         — user-defined visual themes
-//	  projects.toml         — registry index
-//	  projects/<name>/
-//	    layout.yaml         — resolved layout snapshot
-//	    state.json          — runtime state (last WindowID, last-launched-at)
+// All persistent files live under $XDG_CONFIG_HOME/boo (default ~/.config/boo):
+// config.yaml, layouts/*.yaml, themes/*.yaml, projects.toml, projects/<name>/.
 package state
 
 import (
@@ -29,11 +19,8 @@ type Paths struct {
 	ProjectsDir string // ConfigDir/projects
 }
 
-// Default returns the standard paths derived from XDG env vars (or sensible
-// macOS/Linux fallbacks).
-//
-// If $BOO_HOME is set, it overrides everything: all state lives under $BOO_HOME.
-// This is intended for tests and power users who want all boo state in one place.
+// Default returns paths derived from XDG env vars. If $BOO_HOME is set it
+// overrides everything; intended for tests and power users.
 func Default() (Paths, error) {
 	if root := os.Getenv("BOO_HOME"); root != "" {
 		return ForRoot(root), nil
@@ -49,8 +36,7 @@ func Default() (Paths, error) {
 	return forBase(filepath.Join(cfg, "boo")), nil
 }
 
-// ForRoot returns Paths rooted at a single base directory. Used in tests so
-// tests don't pollute the user's real config dir.
+// ForRoot returns Paths rooted at base. Used in tests to avoid polluting the user's config dir.
 func ForRoot(root string) Paths {
 	return forBase(root)
 }
@@ -71,17 +57,13 @@ func (p Paths) ProjectDir(name string) string {
 	return filepath.Join(p.ProjectsDir, name)
 }
 
-// ProjectLayoutFile returns the path to the per-project layout snapshot
-// (layout.yaml). Centralised so callers don't hard-code the filename in
-// multiple places — the on-disk name has changed once already (.toml →
-// .yaml) and may again.
+// ProjectLayoutFile returns the path to the per-project layout snapshot.
+// Centralised here because the filename changed once (.toml → .yaml) and may again.
 func (p Paths) ProjectLayoutFile(name string) string {
 	return filepath.Join(p.ProjectDir(name), "layout.yaml")
 }
 
-// ProjectStateFile returns the path to the per-project runtime state
-// file (state.json). Symmetric with ProjectLayoutFile so callers
-// (notably `boo show`) don't have to know the on-disk filename.
+// ProjectStateFile returns the path to the per-project runtime state file (state.json).
 func (p Paths) ProjectStateFile(name string) string {
 	return filepath.Join(p.ProjectDir(name), "state.json")
 }

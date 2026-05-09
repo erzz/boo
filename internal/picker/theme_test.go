@@ -16,19 +16,15 @@ func TestThemeByName_UnknownFallsBackSilently(t *testing.T) {
 	if ok {
 		t.Error("ThemeByName for unknown theme returned ok=true")
 	}
-	// Returned theme must still be usable — Render must not panic and
-	// must not return empty for non-empty input.
+	// Fallback theme must be usable: Render must not panic and must not return empty.
 	if got := theme.Title.Render("hello"); got == "" {
 		t.Error("fallback theme returned empty render for non-empty input")
 	}
 }
 
 func TestDefaultTheme_AllFieldsPopulated(t *testing.T) {
-	// A zero-value lipgloss.Style renders its input unchanged but with
-	// no styling. We can't check "is styled" easily, but we can at
-	// least verify no field panics on Render. This guards against a
-	// future contributor adding a Theme field and forgetting to set
-	// it in defaultTheme().
+	// Zero-value lipgloss.Style renders input unchanged; we can't assert "is styled" but
+	// can verify no field panics on Render — guards against a new Theme field left unset in defaultTheme().
 	th := defaultTheme()
 	for name, s := range map[string]any{
 		"Title":                  th.Title,

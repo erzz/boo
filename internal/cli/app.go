@@ -14,10 +14,8 @@ import (
 )
 
 // app is the shared dependency bundle for cobra commands.
-//
-// Constructed lazily per invocation in newApp so that command tree creation
-// (used in tests / completions) doesn't touch the filesystem or external
-// processes.
+// Constructed lazily per invocation so command-tree creation doesn't touch
+// the filesystem or external processes.
 type app struct {
 	Paths      state.Paths
 	Runner     booexec.Runner
@@ -38,10 +36,7 @@ func newApp() (*app, error) {
 	}
 	cfg, srcs, err := config.Load(p.ConfigFile)
 	if err != nil {
-		// A malformed config is a hard failure — silently falling back
-		// to defaults would mask user typos. Missing file is fine and
-		// already handled inside Load (returns factory defaults, no
-		// error).
+		// Malformed config is a hard failure — silently ignoring would mask user typos.
 		return nil, err
 	}
 	r := booexec.NewReal()
@@ -83,16 +78,10 @@ func resolveDir(dir string) (string, error) {
 	return clean, nil
 }
 
-// resolveCloneDestination returns the absolute path a clone should target.
-//
-//   - If into is non-empty, it is absolutised and returned (existence and
-//     emptiness are validated by the cloner itself, not here).
-//   - Otherwise, if projectsDir is non-empty, the destination is
-//     <projectsDir>/<repo-name> — honours the user's `projects_dir`
-//     config so clones land in a consistent place regardless of the
-//     directory `boo new` was run from.
-//   - Otherwise the destination is derived relative to cwd:
-//     <cwd>/<repo-name>, with .git stripped from the repo name.
+// resolveCloneDestination returns the absolute clone destination path.
+//   - into non-empty: absolutised and returned.
+//   - projectsDir non-empty: <projectsDir>/<repo-name>.
+//   - otherwise: <cwd>/<repo-name> (strip .git from repo name).
 func resolveCloneDestination(into, url, projectsDir string) (string, error) {
 	if into != "" {
 		abs := into
@@ -111,18 +100,9 @@ func resolveCloneDestination(into, url, projectsDir string) (string, error) {
 	return git.DeriveDestination("", url)
 }
 
-// expandRepoShorthand turns a bare repo name into a full clone URL by
-// prepending the configured default remote.
-//
-//   - If from already looks like a full URL (contains "://" or ":" for
-//     SSH-style git@host:owner/repo) or contains a path separator,
-//     it's returned unchanged.
-//   - If defaultRemote is empty, from is returned unchanged.
-//   - Otherwise, returns "<defaultRemote>/<from>" (with one slash,
-//     trailing slashes stripped from defaultRemote).
-//
-// The result is intentionally not validated as a URL — the cloner
-// surfaces a clear error if the resulting URL doesn't resolve.
+// expandRepoShorthand prepends defaultRemote when from is a bare repo name
+// (no "://", ":", or "/" — not a full URL or SSH-style path). Result is not
+// validated; the cloner surfaces a clear error for unresolvable URLs.
 func expandRepoShorthand(from, defaultRemote string) string {
 	if from == "" || defaultRemote == "" {
 		return from

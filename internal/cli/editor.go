@@ -7,26 +7,15 @@ import (
 	"strings"
 )
 
-// buildEditorCmd constructs an *exec.Cmd that will open path in the
-// user's preferred editor.
+// buildEditorCmd constructs an *exec.Cmd that opens path in the user's preferred editor.
 //
-// Resolution order:
-//  1. editorOverride — non-empty string passed by the caller (e.g. a
-//     --editor flag value, or a pre-resolved $EDITOR string).
-//  2. $EDITOR environment variable.
-//  3. $VISUAL environment variable.
-//  4. Error with an actionable message.
+// Resolution order: editorOverride → $EDITOR → $VISUAL → error.
+// Multi-word values (e.g. "code --wait") are tokenised; backtick substitution and
+// unterminated quotes are rejected.
 //
-// Multi-word editor values (e.g. "code --wait", "emacs -nw -Q") are
-// tokenised with a minimal shell-split that handles unquoted tokens,
-// single-quoted groups, and double-quoted groups. Backtick substitution
-// and subshells are rejected.
-//
-// This function intentionally bypasses internal/exec.Runner. Interactive
-// editors need direct access to the controlling TTY (stdin/stdout/stderr
-// pass-through), which the Runner's capture-buffer model cannot support.
-// This is a documented exception — see also fzf.go (runFzf) and the
-// tea.ExecProcess call in picker_helpers.go (onOpenLayout).
+// Intentionally bypasses internal/exec.Runner — interactive editors need direct TTY
+// access that the Runner's capture-buffer model cannot support. Documented exception;
+// see also runFzf (picker_helpers.go) and tea.ExecProcess (picker_helpers.go onOpenLayout).
 func buildEditorCmd(editorOverride, path string) (*exec.Cmd, error) {
 	editor := editorOverride
 	if editor == "" {
@@ -46,10 +35,8 @@ func buildEditorCmd(editorOverride, path string) (*exec.Cmd, error) {
 	return exec.Command(name, args...), nil //nolint:gosec // args are user-supplied editor tokens, not shell strings
 }
 
-// openInEditor builds an editor command via buildEditorCmd and runs it
-// with stdin/stdout/stderr attached to the process's controlling terminal.
-// Intended for CLI commands (boo config edit, boo edit) that hand off
-// to the editor and wait for it to exit before continuing.
+// openInEditor builds an editor command and runs it with TTY attached.
+// Intended for CLI commands (boo config edit, boo edit) that hand off to the editor.
 func openInEditor(editorOverride, path string) error {
 	cmd, err := buildEditorCmd(editorOverride, path)
 	if err != nil {
@@ -61,15 +48,9 @@ func openInEditor(editorOverride, path string) error {
 	return cmd.Run()
 }
 
-// splitEditorCommand tokenises an editor command string into a command
-// name and argument list. It handles:
-//   - unquoted tokens delimited by ASCII whitespace
-//   - single-quoted groups (no escape processing inside)
-//   - double-quoted groups (no escape processing inside)
-//
-// Backticks are rejected because subshell substitution is not supported
-// and silently expanding them would be unexpected and potentially unsafe.
-// Unterminated quotes are also rejected.
+// splitEditorCommand tokenises an editor command into name and args.
+// Handles unquoted tokens, single-quoted groups, and double-quoted groups.
+// Backticks and unterminated quotes are rejected.
 func splitEditorCommand(s string) (cmd string, args []string, err error) {
 	tokens, err := shsplit(s)
 	if err != nil {
@@ -81,8 +62,7 @@ func splitEditorCommand(s string) (cmd string, args []string, err error) {
 	return tokens[0], tokens[1:], nil
 }
 
-// shsplit is the minimal tokeniser backing splitEditorCommand. It splits
-// s into whitespace-separated tokens, honouring single and double quotes.
+// shsplit is the minimal tokeniser backing splitEditorCommand.
 func shsplit(s string) ([]string, error) {
 	var tokens []string
 	var cur strings.Builder

@@ -114,20 +114,9 @@ func TestRenderStatus(t *testing.T) {
 	}
 }
 
-// Bare `boo` (list-first flows) must NEVER short-circuit to the
-// "this directory is already registered" interstitial. The interstitial
-// only answers the question "you asked to create a new project here,
-// but this dir already has one — switch or continue?", which is
-// nonsensical when the user just wants their project list.
-//
-// `boo new` and `boo save`'s form fallback (formOnly=true) DO want the
-// interstitial when a registered dir is detected, so the bare case
-// has to be selectively skipped without breaking those flows.
-//
-// This was a real regression: a previous implementation gated the
-// interstitial purely on AlreadyRegisteredAs being non-empty, which
-// meant bare `boo` from inside any registered dir hit the interstitial
-// before showing the list. Pin the precedence rule so it can't drift.
+// TestInitialScreen_BareBooSkipsInterstitial: regression — bare `boo` must NEVER hit the
+// "dir already registered" interstitial. Only formOnly=true flows (boo new / boo save fallback)
+// want the interstitial. Previous impl gated it purely on AlreadyRegisteredAs being non-empty.
 func TestInitialScreen_BareBooSkipsInterstitial(t *testing.T) {
 	tests := []struct {
 		name                string
@@ -170,12 +159,9 @@ func TestInitialScreen_BareBooSkipsInterstitial(t *testing.T) {
 	}
 }
 
-// Fix 1: RefreshItems error must leave items intact; empty slice must clear.
+// Fix 1: error leaves items intact; empty slice clears.
 
-// TestRefreshList_ErrorPreservesItems verifies that when the RefreshItems
-// callback returns an error the existing list contents are kept unchanged.
-// This is the critical invariant: a transient registry read failure must
-// not wipe out the items the user is currently looking at.
+// TestRefreshList_ErrorPreservesItems: transient registry read failure must not wipe displayed items.
 func TestRefreshList_ErrorPreservesItems(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	beta := Item{Key: "beta", Title: "beta"}
@@ -205,10 +191,7 @@ func TestRefreshList_ErrorPreservesItems(t *testing.T) {
 	}
 }
 
-// TestRefreshList_EmptySliceShowsEmptyState verifies that a nil error
-// with an empty (or nil) item slice updates the list to empty. This is
-// distinct from an error: it is the correct outcome when the last project
-// has been deleted.
+// TestRefreshList_EmptySliceShowsEmptyState: nil error + empty slice → list clears (last project deleted).
 func TestRefreshList_EmptySliceShowsEmptyState(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	m := newTestModel(alpha)
@@ -226,9 +209,7 @@ func TestRefreshList_EmptySliceShowsEmptyState(t *testing.T) {
 	}
 }
 
-// TestRefreshList_NilSliceSuccessShowsEmptyState verifies that a nil
-// slice returned alongside a nil error also clears the list (nil == empty
-// in the "no projects remaining" sense).
+// TestRefreshList_NilSliceSuccessShowsEmptyState: nil slice + nil error also clears (nil == empty).
 func TestRefreshList_NilSliceSuccessShowsEmptyState(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	m := newTestModel(alpha)
@@ -248,9 +229,7 @@ func TestRefreshList_NilSliceSuccessShowsEmptyState(t *testing.T) {
 
 // Fix 2: delete with purge + window-close failure must surface the warning.
 
-// TestRunIntent_DeletePurge_WindowCloseWarning verifies that when the
-// onDelete callback returns a non-empty warnings slice (window close
-// failed) the status bar reflects it rather than claiming success.
+// TestRunIntent_DeletePurge_WindowCloseWarning: non-fatal window-close failure must show in status bar.
 func TestRunIntent_DeletePurge_WindowCloseWarning(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	m := newTestModel(alpha)
@@ -275,8 +254,7 @@ func TestRunIntent_DeletePurge_WindowCloseWarning(t *testing.T) {
 	}
 }
 
-// TestRunIntent_DeletePurge_NoWarning verifies the happy path: when
-// purge succeeds without a warning the status says "deleted … and closed window".
+// TestRunIntent_DeletePurge_NoWarning: happy path — purge success says "deleted … and closed window".
 func TestRunIntent_DeletePurge_NoWarning(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	m := newTestModel(alpha)
@@ -297,8 +275,7 @@ func TestRunIntent_DeletePurge_NoWarning(t *testing.T) {
 	}
 }
 
-// TestRunIntent_Delete_ErrorPreservesItems verifies that a failed delete
-// shows an error screen and does NOT call refresh (so items are preserved).
+// TestRunIntent_Delete_ErrorPreservesItems: failed delete shows error screen and does NOT refresh.
 func TestRunIntent_Delete_ErrorPreservesItems(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	m := newTestModel(alpha)
@@ -322,12 +299,8 @@ func TestRunIntent_Delete_ErrorPreservesItems(t *testing.T) {
 	}
 }
 
-// Fix 1 (extended): Both window-close AND state-dir purge warnings must be
-// surfaced when the picker uses the in-loop delete callback.
-//
-// This test verifies the critical gap the reviewer identified: the picker
-// was previously discarding state-dir purge failures via io.Discard. With
-// the []string return type every non-fatal failure is visible.
+// Fix 1 (extended): both window-close AND state-dir purge warnings must be surfaced.
+// Regression: picker previously discarded state-dir purge failures via io.Discard.
 func TestRunIntent_Delete_MultipleWarnings(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha"}
 	m := newTestModel(alpha)
@@ -358,11 +331,9 @@ func TestRunIntent_Delete_MultipleWarnings(t *testing.T) {
 	}
 }
 
-// ─── Fix 3: Async picker startup ─────────────────────────────────────────────
+// Fix 3: async picker startup.
 
-// TestInit_ReturnsEnrichCmdWhenRefreshSet verifies that Init() returns a
-// non-nil tea.Cmd when a RefreshItems callback is configured. The cmd is the
-// async enrichment kick-off; nil would mean the picker never enriches items.
+// TestInit_ReturnsEnrichCmdWhenRefreshSet: Init() must return non-nil cmd when refreshItems is set.
 func TestInit_ReturnsEnrichCmdWhenRefreshSet(t *testing.T) {
 	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
 	m.refreshItems = func() ([]Item, error) { return nil, nil }
@@ -373,9 +344,7 @@ func TestInit_ReturnsEnrichCmdWhenRefreshSet(t *testing.T) {
 	}
 }
 
-// TestInit_NilWhenNoRefreshItems verifies that Init() returns nil (no-op) when
-// no RefreshItems callback is configured — e.g. in the delete-picker which
-// uses pre-enriched items.
+// TestInit_NilWhenNoRefreshItems: Init() returns nil (no-op) when no RefreshItems callback is set.
 func TestInit_NilWhenNoRefreshItems(t *testing.T) {
 	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
 	// m.refreshItems intentionally nil
@@ -386,9 +355,7 @@ func TestInit_NilWhenNoRefreshItems(t *testing.T) {
 	}
 }
 
-// TestEnrichedItemsMsg_UpdatesItemList verifies that when an enrichedItemsMsg
-// arrives the model replaces the current item list with the enriched items.
-// This is the core of the async startup enrichment path.
+// TestEnrichedItemsMsg_UpdatesItemList: enrichedItemsMsg replaces current items with enriched ones.
 func TestEnrichedItemsMsg_UpdatesItemList(t *testing.T) {
 	// Start with a bare item (no Status — as if built by buildBareItems).
 	bare := Item{Key: "alpha", Title: "alpha", Status: ""}
@@ -413,8 +380,7 @@ func TestEnrichedItemsMsg_UpdatesItemList(t *testing.T) {
 	}
 }
 
-// TestEnrichedItemsMsg_ErrorPreservesItems verifies that an enrichedItemsMsg
-// carrying an error leaves the existing item list intact.
+// TestEnrichedItemsMsg_ErrorPreservesItems: enrichedItemsMsg carrying an error leaves existing items intact.
 func TestEnrichedItemsMsg_ErrorPreservesItems(t *testing.T) {
 	alpha := Item{Key: "alpha", Title: "alpha", Status: "stopped"}
 	m := newTestModel(alpha)
@@ -429,10 +395,8 @@ func TestEnrichedItemsMsg_ErrorPreservesItems(t *testing.T) {
 	}
 }
 
-// TestView_DoesNotMutateModel verifies that View() is pure: calling it
-// multiple times must not change any model fields (screen, status, etc.).
-// This is the Bubble Tea contract: View must be a pure projection of model
-// state, never a place where side effects sneak in.
+// TestView_DoesNotMutateModel: View() must be pure (Bubble Tea contract). Calling it N times
+// must not change screen, status, or any other model field.
 func TestView_DoesNotMutateModel(t *testing.T) {
 	m := newTestModel(
 		Item{Key: "alpha", Title: "alpha", Status: "stopped"},
@@ -458,15 +422,9 @@ func TestView_DoesNotMutateModel(t *testing.T) {
 	}
 }
 
-// ─── Must-fix 1: View() must not invoke the PreviewProject callback ───────────
-
-// TestView_DoesNotInvokePreviewCallback asserts that View() is I/O-free: the
-// PreviewProject callback must never be called directly from within View(). The
-// preview is dispatched as a tea.Cmd (from startPreview / Init) and applied in
-// Update; View() only reads from the previewCache.
-//
-// This test would have caught the original bug: previewProject was called
-// synchronously inside renderItemDetail → viewRightPane → viewList → View().
+// Must-fix 1: View() must not invoke the PreviewProject callback.
+// Regression: previewProject was called synchronously inside renderItemDetail → viewRightPane → View().
+// Preview must be dispatched as a tea.Cmd and applied in Update; View() only reads previewCache.
 func TestView_DoesNotInvokePreviewCallback(t *testing.T) {
 	m := newTestModel(
 		Item{Key: "alpha", Title: "alpha", Status: "stopped"},
@@ -481,9 +439,7 @@ func TestView_DoesNotInvokePreviewCallback(t *testing.T) {
 		return "preview"
 	}
 
-	// Init() returns a tea.Cmd that would eventually invoke previewProject
-	// asynchronously — but we do not execute it here. We just verify that
-	// calling View() directly does NOT invoke the callback.
+	// Init() dispatches previewProject asynchronously — we do NOT run it. Just verify View() doesn't invoke it.
 	_ = m.Init()
 	_ = m.View()
 	_ = m.View()
@@ -493,24 +449,16 @@ func TestView_DoesNotInvokePreviewCallback(t *testing.T) {
 	}
 }
 
-// ─── Must-fix 2: Stale enrichment results must be discarded ──────────────────
-
-// TestEnrichment_OldResultIgnored verifies that when two enrichment rounds
-// are started and the older one finishes last, its result is silently dropped
-// and the model retains the original (unenriched) state until the newer result
-// arrives.
-//
-// Concrete failure scenario: user deletes a project quickly after launch;
-// the post-delete refresh removes it, then the slower startup enrichment
-// arrives and reinserts it. This test would fail on the pre-fix code.
+// Must-fix 2: stale enrichment results must be discarded.
+// Regression: user deletes a project quickly after launch; post-delete refresh removes it;
+// slower startup enrichment arrives and reinserts it.
 func TestEnrichment_OldResultIgnored(t *testing.T) {
 	bare := Item{Key: "alpha", Title: "alpha", Status: ""}
 	m := newTestModel(bare)
 	m.hideNewProject = true
 	m.refreshItems = func() ([]Item, error) { return nil, nil }
 
-	// Simulate two in-flight enrichments by calling startEnrich twice.
-	// After the second call m.enrichGen == 2.
+	// Simulate two in-flight enrichments; gen=2 is the current one.
 	_ = m.startEnrich() // gen=1 — slow startup enrichment
 	_ = m.startEnrich() // gen=2 — faster post-action refresh
 

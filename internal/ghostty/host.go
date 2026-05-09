@@ -1,9 +1,7 @@
 package ghostty
 
-// Detection helper for the integration-test guardrail. Lives in non-test code
-// so it can be unit tested without the integration build tag. Not exported —
-// only the test guard uses it.
-
+// detectGhosttyHost reports whether the process is running inside Ghostty.
+// Lives in non-test code so it can be unit-tested without the integration tag.
 func detectGhosttyHost(env func(string) string) bool {
 	if env("GHOSTTY_RESOURCES_DIR") != "" {
 		return true

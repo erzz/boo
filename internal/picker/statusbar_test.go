@@ -7,9 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// TestStatusBar_IdleShowsHint: with no actions taken, the bar shows
-// the faint "press ? for help" hint, not an empty string. Empty would
-// look like a layout bug; the hint reassures the user the bar is alive.
+// TestStatusBar_IdleShowsHint: idle status bar shows "press ? for help", not empty string.
 func TestStatusBar_IdleShowsHint(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/x/alpha"})
 	v := m.View()
@@ -18,9 +16,7 @@ func TestStatusBar_IdleShowsHint(t *testing.T) {
 	}
 }
 
-// TestStatusBar_DeleteSuccessSetsStatus: a successful delete writes
-// "deleted <name>" to the status bar (visible after the action returns
-// the user to the list).
+// TestStatusBar_DeleteSuccessSetsStatus: successful delete writes "deleted <name>" to status bar.
 func TestStatusBar_DeleteSuccessSetsStatus(t *testing.T) {
 	m, _ := modelWithDelete(Item{Key: "alpha", Title: "alpha", Description: "/x/alpha"})
 	m = pressKey(t, m, "d")
@@ -36,8 +32,7 @@ func TestStatusBar_DeleteSuccessSetsStatus(t *testing.T) {
 	}
 }
 
-// TestStatusBar_PurgeSuccessReflectsWindowClose: purge variant of delete
-// gets a different message so the user knows the window was also closed.
+// TestStatusBar_PurgeSuccessReflectsWindowClose: purge delete shows "closed window" in status.
 func TestStatusBar_PurgeSuccessReflectsWindowClose(t *testing.T) {
 	m, _ := modelWithDelete(Item{Key: "alpha", Title: "alpha", Description: "/x/alpha"})
 	m = pressKey(t, m, "D")
@@ -47,10 +42,7 @@ func TestStatusBar_PurgeSuccessReflectsWindowClose(t *testing.T) {
 	}
 }
 
-// TestStatusBar_FailureSetsErrorStatus: a failed action lands on
-// screenError AND populates the status bar with isErr=true. After the
-// user dismisses the error screen, the failure remains visible at the
-// bottom (rather than vanishing).
+// TestStatusBar_FailureSetsErrorStatus: failed action → screenError + isErr=true; persists after dismiss.
 func TestStatusBar_FailureSetsErrorStatus(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/x/alpha"})
 	m.onDelete = func(_ string, _ bool) ([]string, error) { return nil, errFake }
@@ -78,8 +70,7 @@ func TestStatusBar_FailureSetsErrorStatus(t *testing.T) {
 	}
 }
 
-// TestStatusBar_EditorSuccessSetsStatus: success path through
-// editorFinishedMsg sets the status bar to "layout file saved".
+// TestStatusBar_EditorSuccessSetsStatus: editorFinishedMsg with nil error sets status to "layout file saved".
 func TestStatusBar_EditorSuccessSetsStatus(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/x/alpha"})
 	m.refreshItems = func() ([]Item, error) {
@@ -95,10 +86,7 @@ func TestStatusBar_EditorSuccessSetsStatus(t *testing.T) {
 	}
 }
 
-// TestList_RowsAreSingleLine: the path that used to render under the
-// title is gone. We assert by checking that the project's directory
-// (Description) does not appear in the rendered list (it lives in the
-// right pane only). Indirectly confirms Height()=1.
+// TestList_RowsAreSingleLine: Description (path) must not appear in the list (right-pane only). Confirms Height()=1.
 func TestList_RowsAreSingleLine(t *testing.T) {
 	m := sizedModel(60, // narrow → right pane suppressed, list-only view
 		Item{Key: "alpha", Title: "alpha", Description: "/x/SECRET-PATH-MARKER"},
@@ -112,10 +100,8 @@ func TestList_RowsAreSingleLine(t *testing.T) {
 	}
 }
 
-// TestSplit_Threshold: width=90 should activate split mode (was 70 in
-// the previous threshold; raised after real-world Ghostty panes at
-// ~83 cols produced exact-fit layouts with no breathing room and
-// content drift visibly overflowed into adjacent panes).
+// TestSplit_LowerThreshold: width=90 activates split mode.
+// Threshold raised from 70 after real-world 83-col panes showed content overflow.
 func TestSplit_LowerThreshold(t *testing.T) {
 	m := sizedModel(90, Item{Key: "alpha", Title: "alpha"})
 	if !m.splitActive() {
@@ -146,8 +132,7 @@ func TestSplit_ShortTerminalCollapses(t *testing.T) {
 }
 
 // TestSplit_HeightAtThreshold: height=24 is the floor for split mode.
-func TestSplit_HeightAtThreshold(t *testing.T) {
-	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
+func TestSplit_HeightAtThreshold(t *testing.T) {	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
 	m.theme = defaultTheme()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 	mm := updated.(*model)
@@ -156,8 +141,7 @@ func TestSplit_HeightAtThreshold(t *testing.T) {
 	}
 }
 
-// TestSplit_HeightOneBelowThresholdInactive: height=23 (one below
-// splitMinHeight) should suppress split mode.
+// TestSplit_HeightOneBelowThresholdInactive: height=23 (one below splitMinHeight) suppresses split mode.
 func TestSplit_HeightOneBelowThresholdInactive(t *testing.T) {
 	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
 	m.theme = defaultTheme()
@@ -168,11 +152,8 @@ func TestSplit_HeightOneBelowThresholdInactive(t *testing.T) {
 	}
 }
 
-// TestStatusBar_LeavesRoomForList: when the status bar is rendered, the
-// list's height is reduced by statusBarHeight + listBorderOverhead.
-// Concretely: at H=24 the list inner area should be 24 - 1 - 2 = 21.
-// We can't probe list.Height directly, but we can re-derive it from
-// the model and assert the math holds.
+// TestStatusBar_LeavesRoomForList: at H=24 the list inner area is 24-1-2=21 (statusBarHeight + listBorderOverhead).
+// Smoke-checks that viewList doesn't crash and the math doesn't produce negative space.
 func TestStatusBar_LeavesRoomForList(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha"})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
@@ -180,9 +161,7 @@ func TestStatusBar_LeavesRoomForList(t *testing.T) {
 	if mm.height != 24 {
 		t.Errorf("model.height = %d, want 24", mm.height)
 	}
-	// Ensuring viewList doesn't crash + produces a non-empty render
-	// at this size is a useful smoke check that the math doesn't wrap
-	// into negative territory.
+	// Smoke-check: non-empty render at H=24 means the math doesn't wrap into negative territory.
 	if v := mm.View(); v == "" {
 		t.Error("View() returned empty at H=24, status bar math may have starved the list")
 	}

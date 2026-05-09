@@ -8,17 +8,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// setLayoutModel is the sub-screen reached by pressing 'l' on a project
-// row in the list. It cycles through the available layout templates and
-// emits a SetLayoutIntent on enter.
-//
-// Mirrors the form's layout cycler but stripped down — we don't need
-// name/dir/from inputs here, just template selection. The cycler logic
-// is duplicated rather than extracted from form.go because (a) the
-// formModel cycler is intertwined with three other inputs and a
-// preview pane, and (b) one ~30-line copy is cheaper than a refactor
-// that would touch every form_test.go assertion. If a third caller
-// shows up we extract.
+// setLayoutModel is the sub-screen reached by pressing 'l' on a project row.
+// Duplicates the form's layout cycler rather than extracting it — the formModel cycler
+// is intertwined with three other inputs. One ~30-line copy is cheaper than the refactor.
 type setLayoutModel struct {
 	projectName string
 	names       []string // template names; never empty when this screen is active
@@ -26,12 +18,7 @@ type setLayoutModel struct {
 	preview     func(name string) string // optional ASCII preview callback
 }
 
-// newSetLayoutModel constructs the sub-screen pre-positioned at the
-// project's current template (so ←/→ cycles relative to "what it is
-// now" rather than always starting at index 0).
-//
-// If currentTemplate isn't in names, we start at index 0 — the user can
-// still cycle to any template, we just don't have a meaningful anchor.
+// newSetLayoutModel constructs the sub-screen pre-positioned at currentTemplate (or index 0 if not found).
 func newSetLayoutModel(projectName, currentTemplate string, names []string, preview func(string) string) setLayoutModel {
 	idx := 0
 	for i, n := range names {
@@ -48,9 +35,7 @@ func newSetLayoutModel(projectName, currentTemplate string, names []string, prev
 	}
 }
 
-// cycle moves the cursor by delta (-1 or +1), wrapping. Returns the
-// receiver by value because setLayoutModel is a value type and Update
-// idiomatically reassigns m.setLayout = m.setLayout.cycle(±1).
+// cycle moves the cursor by delta (-1 or +1), wrapping. Returns by value — Update reassigns m.setLayout.
 func (s setLayoutModel) cycle(delta int) setLayoutModel {
 	if len(s.names) == 0 {
 		return s
@@ -97,9 +82,7 @@ func (s setLayoutModel) view(t Theme) string {
 }
 
 // updateSetLayout handles input on the set-layout sub-screen.
-//
-// Lives on *model (not setLayoutModel) so it can mutate m.intent on
-// confirm and m.screen on cancel — the same pattern updateConfirm uses.
+// Lives on *model (not setLayoutModel) so it can mutate m.intent on confirm and m.screen on cancel.
 func (m *model) updateSetLayout(msg tea.Msg) (tea.Model, tea.Cmd) {
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {

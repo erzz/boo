@@ -15,17 +15,9 @@ import (
 //go:embed all:themes
 var bundledThemes embed.FS
 
-// Resolve looks up a named theme, preferring user themes in themesDir
-// over built-ins. themesDir may be empty, in which case only built-ins
-// are consulted (used in tests and when boo is run on a machine with no
-// config dir yet).
-//
-// An empty name resolves to "default". This matches the contract used
-// by `internal/config` — `ui.theme: ""` means "use the default theme".
-//
-// Validation is lenient: a malformed user theme returns the parse
-// error, but the caller (typically the picker) is expected to fall back
-// to the built-in default theme rather than fail. See package doc.
+// Resolve looks up a named theme, preferring user themes in themesDir over
+// built-ins. An empty name resolves to "default". On any parse error the
+// caller is expected to fall back to the default theme rather than fail.
 func Resolve(themesDir, name string) (Resolved, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -76,10 +68,8 @@ func Resolve(themesDir, name string) (Resolved, error) {
 	}, nil
 }
 
-// MustDefault returns the embedded default theme. Used as the ultimate
-// fallback when even user-requested themes fail to load. Panics only if
-// the embedded `default.yaml` is missing or malformed, which would
-// indicate a corrupt binary.
+// MustDefault returns the embedded default theme. Panics only if the binary
+// is corrupt (missing or malformed built-in default.yaml).
 func MustDefault() Theme {
 	r, err := Resolve("", "default")
 	if err != nil {
@@ -167,15 +157,9 @@ func parseTheme(data []byte, defaultName string) (Theme, error) {
 	return t, nil
 }
 
-// fillDefaults backfills any unset colour slot from the built-in
-// `default` theme. This means user themes can override only the slots
-// they care about — e.g. just the `border` colour — without copying
-// the entire palette. Without this, an empty slot would render as
-// terminal default fg, which the user almost certainly didn't intend.
-//
-// Only applied to user themes (and to the default itself, which is a
-// no-op); a broken built-in default would surface as the panic in
-// MustDefault rather than as silent fallback.
+// fillDefaults backfills any unset colour slot from the built-in default theme,
+// so user themes can override only the slots they care about. No-op for the
+// default theme itself.
 func fillDefaults(t Theme) Theme {
 	if t.Name == "default" {
 		return t
@@ -218,10 +202,8 @@ func stripYAMLExt(filename string) (string, bool) {
 	return strings.TrimSuffix(filename, ".yaml"), true
 }
 
-// validThemeName mirrors layout's name validation: reject path traversal
-// and anything that isn't a plain identifier. Themes live as
-// `<name>.yaml` inside themesDir or the embedded FS; we never want a
-// "../foo" or "/etc/passwd" lookup to slip through.
+// validThemeName rejects path traversal so a "../foo" lookup can't escape
+// themesDir or the embedded FS.
 func validThemeName(name string) error {
 	if name == "" {
 		return fmt.Errorf("theme name is empty")

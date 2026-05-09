@@ -1,21 +1,7 @@
-// Package layout defines boo's layout vocabulary and the rules for parsing
-// it from YAML.
-//
-// A layout is a small recursive tree:
-//
-//   - A Layout has a name and one or more Tabs.
-//   - Each Tab has exactly one root Split.
-//   - A Split is either a leaf (carries cwd, command, env, initial input)
-//     OR an interior node (carries direction = "row" | "column" and >=2
-//     children, each itself a Split). XOR — never both.
-//
-// The shape of the YAML file IS the shape of the rendered Ghostty window.
-// "row" lays children out left-to-right; "column" stacks them top-to-bottom.
-// We borrow these names from CSS flexbox where they mean exactly the same
-// thing — the parent owns the orientation, not its children.
-//
-// cwd values may be relative; resolution against the project directory
-// happens at apply time (not here).
+// Package layout defines boo's layout vocabulary and YAML parsing.
+// A Layout has Tabs, each Tab has a root Split tree. A Split is either a leaf
+// (cwd/command/env/initial_input) or an interior node (direction + 2 children).
+// "row" = left-to-right, "column" = top-to-bottom (CSS flexbox conventions).
 package layout
 
 import (
@@ -27,18 +13,13 @@ import (
 )
 
 // Direction values accepted on an interior Split.
-//
-// We deliberately do NOT model "row-reverse" or "column-reverse". If a user
-// wants a different order, they reorder Children. One way to do things.
 const (
 	DirRow    = "row"
 	DirColumn = "column"
 )
 
-// MaxDepth caps recursion in the validator. Protects the renderer and JXA
-// walker against pathological inputs (deeply-nested trees that would either
-// produce sub-character-wide cells or stack `osascript` calls). 8 is well
-// past anything a human would hand-author for a useful screen layout.
+// MaxDepth caps recursion in the validator. Protects the renderer and JXA walker
+// against pathological inputs; 8 is well beyond any useful human-authored layout.
 const MaxDepth = 8
 
 // Layout is a complete project layout.
@@ -56,25 +37,15 @@ type Tab struct {
 
 // Split is one node in a tab's split tree.
 //
-// Exactly one of two shapes is valid (validated by Validate):
+// Exactly one of two shapes is valid:
+//   - LEAF: Direction == "" && Children == nil. Carries Cwd plus optional Command/InitialInput/Env.
+//   - INTERIOR: Direction != "" && len(Children) == 2. No leaf properties.
 //
-//   - LEAF: Direction == "" && Children == nil. Carries Cwd plus
-//     optional Command, InitialInput, Env.
-//   - INTERIOR: Direction != "" && len(Children) == 2. Carries no
-//     leaf properties. Children render in order; for "row" the first
-//     child is left, the second is right; for "column" the first is
-//     top, the second is bottom.
+// Why exactly 2 children: Ghostty's AppleScript `split` command always halves a pane.
+// Forcing N=2 means a layout that parses is a layout that renders faithfully.
+// Asymmetric N-way splits are still possible by nesting (e.g. row(A, row(B,C))).
 //
-// Why exactly 2 children: Ghostty's AppleScript `split` command
-// always halves a pane. There is no way to ask for a 3-way split that
-// produces three equal-width panes — splitting twice gives 50/25/25.
-// Forcing N=2 here means a layout that parses is a layout that can
-// faithfully render in Ghostty. Asymmetric N-way layouts are still
-// possible by nesting (e.g. row(A, row(B, C)) gives 50/25/25 on
-// purpose, which is at least honest about its proportions).
-//
-// We use json tags throughout (sigs.k8s.io/yaml routes through encoding/json),
-// which means the same struct serialises cleanly to either format.
+// json tags are used throughout (sigs.k8s.io/yaml routes through encoding/json).
 type Split struct {
 	Direction string  `json:"direction,omitempty"`
 	Children  []Split `json:"children,omitempty"`
@@ -85,22 +56,13 @@ type Split struct {
 	Env          map[string]string `json:"env,omitempty"`
 }
 
-// IsLeaf reports whether s is a leaf node. A node is a leaf when it has
-// neither Direction nor Children — same condition Validate enforces.
-//
-// Callers that walk the tree should branch on this rather than re-checking
-// Direction/Children directly, so the leaf-vs-interior contract has one
-// definition and one place to evolve.
+// IsLeaf reports whether s is a leaf node (no Direction and no Children).
+// Prefer this over checking Direction/Children directly.
 func (s Split) IsLeaf() bool {
 	return s.Direction == "" && len(s.Children) == 0
 }
 
-// Default returns boo's built-in fallback layout: the `triple` shape —
-// one big pane on the left, two stacked panes on the right. Chosen as
-// the default because it suits the most common shell-driven workflow
-// (editor / runner / log-tail) without being so opinionated that a
-// single-shell user feels punished. Used when something upstream can't
-// resolve a real template.
+// Default returns the built-in "triple" layout: one large left pane, two stacked right.
 func Default() Layout {
 	return Layout{
 		Name: "triple",
@@ -160,12 +122,8 @@ func (l Layout) Validate() error {
 	return nil
 }
 
-// validateSplit walks a Split subtree enforcing the leaf-XOR-interior rule
-// and the depth cap.
-//
-// path is a human-readable breadcrumb used only in error messages
-// (e.g. `tab 0 ("main") split row[1]`). depth is the current nesting depth;
-// the root of a tab is depth 0.
+// validateSplit walks a Split subtree enforcing the leaf-XOR-interior rule and depth cap.
+// path is a human-readable breadcrumb for error messages; depth 0 = tab root.
 func validateSplit(s Split, path string, depth int) error {
 	if depth > MaxDepth {
 		return fmt.Errorf("layout: %s: nested too deep (max %d)", path, MaxDepth)
@@ -178,15 +136,12 @@ func validateSplit(s Split, path string, depth int) error {
 		return fmt.Errorf("layout: %s: a split is either a leaf (cwd/command/env/initial_input) or an interior node (direction/children); not both", path)
 	}
 
-	// Pure leaf: nothing more to check. We allow a "leaf with no cwd",
-	// which represents an inherit-cwd-from-project terminal — equivalent
-	// to `cwd: .`. Validation of cwd content (e.g. path traversal) is
-	// the caller's job at apply time.
+	// Pure leaf: allow cwd-less leaves (inherit project dir, equivalent to `cwd: .`).
 	if !hasInterior {
 		return nil
 	}
 
-	// Interior: direction must be valid, children >= 2.
+	// Interior: direction must be valid, exactly 2 children.
 	if !validDirection(s.Direction) {
 		return fmt.Errorf("layout: %s: direction %q is not one of row|column", path, s.Direction)
 	}

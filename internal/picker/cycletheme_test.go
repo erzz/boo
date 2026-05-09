@@ -9,14 +9,8 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 )
 
-// newCycleTestModel constructs a minimal *model wired enough for
-// cycleTheme to exercise its full path: a list with a delegate that
-// gets reassigned, a form with a theme field, and the theme cycler
-// fields. Avoids tea.NewProgram because cycleTheme is pure state
-// mutation; no IO loop required.
-//
-// configPath, when non-empty, is stored on the model so cycleTheme
-// will attempt to persist the new theme to disk.
+// newCycleTestModel constructs a minimal *model for cycleTheme tests: list + delegate + theme cycler fields.
+// configPath, when non-empty, enables theme persistence to disk.
 func newCycleTestModel(t *testing.T, themeName, configPath string) *model {
 	t.Helper()
 	th := defaultTheme()

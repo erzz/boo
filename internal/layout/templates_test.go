@@ -7,22 +7,15 @@ import (
 	"testing"
 )
 
-// builtinNames is the curated catalogue we ship. Naming schema:
-// `tabs × cols × rows` for grids, plus `triple` as the named exception.
-//
-// Adding to this list = embedding a new YAML file under templates/ and
-// (probably) updating docs. Removing = breaking change to anyone using
-// `--layout <name>`. Tests below use this slice as the single source of
-// truth so adding/removing in only one place doesn't drift.
+// builtinNames is the curated catalogue shipped with boo (tabs × cols × rows naming, plus "triple").
+// Tests use this as the single source of truth so adding/removing in only one place is caught.
 var builtinNames = []string{
 	"1x1x1", "1x2x1", "1x1x2", "1x2x2",
 	"2x1x1", "2x2x1", "2x2x2",
 	"triple",
 }
 
-// Every built-in must resolve, validate, and ship a description block.
-// One table-driven test instead of N near-identical tests so the failure
-// message points at the exact template that broke.
+// TestResolveTemplate_AllBuiltins: every built-in must resolve, validate, and carry a description.
 func TestResolveTemplate_AllBuiltins(t *testing.T) {
 	for _, name := range builtinNames {
 		t.Run(name, func(t *testing.T) {
@@ -46,20 +39,12 @@ func TestResolveTemplate_AllBuiltins(t *testing.T) {
 	}
 }
 
-// Each built-in must have the structural shape its name promises. This
-// is the regression net for the tabs × cols × rows schema — a future
-// hand-edit that breaks the contract gets caught immediately.
-//
-// `triple` and grid templates with internal trees (1x2x2, 2x2x2) need
-// their tree shape pinned, not just a count.
+// TestBuiltinShapes: each built-in must match the tab/column/row structure its name promises.
+// Regression net for the tabs × cols × rows schema.
 func TestBuiltinShapes(t *testing.T) {
 	type check struct {
 		tabs int
-		// rootKind is "leaf" for a single-pane tab, or "row"/"column"
-		// followed by a pipe-separated child shape: "row|leaf,leaf"
-		// means root is a row with two leaf children. We use a tiny
-		// language rather than a deep struct comparison because the
-		// failure messages are dramatically more readable.
+		// rootShape: "leaf" | "row|..." | "column|..." — tiny shape DSL for readable failure messages.
 		rootShape string
 	}
 	want := map[string]check{
@@ -81,8 +66,7 @@ func TestBuiltinShapes(t *testing.T) {
 			if got := len(r.Layout.Tabs); got != w.tabs {
 				t.Fatalf("tabs = %d, want %d", got, w.tabs)
 			}
-			// Every tab in a built-in must share the same root shape.
-			// (None of our built-ins mix shapes per tab.)
+			// Every tab in a built-in must share the same root shape (none mix shapes per tab).
 			for i, tab := range r.Layout.Tabs {
 				got := describeShape(tab.Root)
 				if got != w.rootShape {
@@ -93,9 +77,7 @@ func TestBuiltinShapes(t *testing.T) {
 	}
 }
 
-// describeShape renders a Split tree as the tiny shape language used in
-// TestBuiltinShapes. Kept private to the test file — it's a debugging
-// aid, not API.
+// describeShape renders a Split tree as the shape DSL used in TestBuiltinShapes.
 func describeShape(s Split) string {
 	if s.IsLeaf() {
 		return "leaf"
@@ -107,10 +89,7 @@ func describeShape(s Split) string {
 	return s.Direction + "|" + strings.Join(parts, ",")
 }
 
-// Every built-in must be tool-agnostic. None can ship with a baked-in
-// `command` (no editors, no runners, no language tooling). If a future
-// change adds one to a built-in, this test catches it before it bites
-// users without that tool installed.
+// TestBuiltins_AreToolAgnostic: no built-in may ship with a baked-in `command` (tools aren't universal).
 func TestBuiltins_AreToolAgnostic(t *testing.T) {
 	for _, name := range builtinNames {
 		t.Run(name, func(t *testing.T) {
@@ -139,7 +118,7 @@ func assertNoCommands(t *testing.T, s Split, path string) {
 }
 
 func itoa(i int) string {
-	// Tiny inline alternative to importing strconv just for one call.
+	// Avoids importing strconv for a single call.
 	if i == 0 {
 		return "0"
 	}
@@ -151,15 +130,12 @@ func itoa(i int) string {
 		n++
 	}
 	// Reverse.
-	for l, r := 0, n-1; l < r; l, r = l+1, r-1 {
-		buf[l], buf[r] = buf[r], buf[l]
+	for l, r := 0, n-1; l < r; l, r = l+1, r-1 {		buf[l], buf[r] = buf[r], buf[l]
 	}
 	return string(buf[:n])
 }
 
-// `--layout ""` should fall back to "triple" (the new default —
-// triple suits the most common shell-driven workflow without being
-// so opinionated that single-shell users feel punished).
+// TestResolveTemplate_EmptyNameDefaultsToTriple: empty name resolves to "triple" (the default layout).
 func TestResolveTemplate_EmptyNameDefaultsToTriple(t *testing.T) {
 	r, err := ResolveTemplate("", "")
 	if err != nil {
@@ -290,9 +266,7 @@ func TestListTemplates_UnionAndDedup(t *testing.T) {
 	}
 }
 
-// Description-extraction tests pin down the leading-comment-block
-// contract used by `boo layouts` and the new-project preview. YAML uses
-// `#` for comments same as TOML — the parser is format-agnostic.
+// Description-extraction tests: pins the leading-comment-block contract used by `boo layouts` and the preview.
 
 func TestExtractDescription_LeadingBlock(t *testing.T) {
 	in := []byte("# First line.\n# Second line.\n\nname: x\n")

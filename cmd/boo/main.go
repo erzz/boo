@@ -23,9 +23,7 @@ func main() {
 	defer stop()
 
 	root := cli.NewRoot(version, commit, date)
-	// cobra prints the error itself ("Error: ...") because SilenceErrors is
-	// false by default. We just exit non-zero on failure.
-	if err := root.ExecuteContext(ctx); err != nil {
-		os.Exit(1)
-	}
+		if err := root.ExecuteContext(ctx); err != nil {
+			os.Exit(1)
+		}
 }

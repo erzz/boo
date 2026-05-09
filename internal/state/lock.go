@@ -7,10 +7,7 @@ import (
 	"syscall"
 )
 
-// Lock is an advisory cross-process file lock obtained via flock(2).
-//
-// Use it to serialize read-modify-write sequences against the registry and
-// per-project state. The lock is held until Close is called.
+// Lock is an advisory cross-process file lock via flock(2). Hold until Close.
 type Lock struct {
 	f    *os.File
 	path string
@@ -38,7 +35,7 @@ func (l *Lock) Close() error {
 	if l == nil || l.f == nil {
 		return nil
 	}
-	// flock is released when the fd is closed; do that explicitly for clarity.
+	// flock is released when the fd is closed.
 	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
 	return l.f.Close()
 }

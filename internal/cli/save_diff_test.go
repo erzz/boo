@@ -7,10 +7,7 @@ import (
 	"github.com/erzz/boo/internal/layout"
 )
 
-// Test helpers — short-name wrappers so fixtures stay readable. They mirror
-// the helpers used in internal/layoutpreview tests so anyone moving between
-// the two packages sees the same vocabulary.
-
+// Test helpers — short-name wrappers for readable fixtures.
 func leaf(cwd string) layout.Split { return layout.Split{Cwd: cwd} }
 
 func leafCmd(cwd, cmd string) layout.Split { return layout.Split{Cwd: cwd, Command: cmd} }

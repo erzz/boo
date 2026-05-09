@@ -9,9 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewRoot returns the root cobra command. All subcommands are registered here.
-// version, commit, and date are injected at build time via -ldflags (see .goreleaser.yaml).
-// When built with plain `go build` they default to "dev", "none", "unknown".
+// NewRoot returns the root cobra command. version/commit/date are injected at
+// build time via -ldflags; they default to "dev"/"none"/"unknown" with plain go build.
 func NewRoot(version, commit, date string) *cobra.Command {
 	var verbose bool
 
@@ -58,17 +57,9 @@ Run 'boo doctor' to verify your environment.`,
 		newShowCmd(),
 	)
 
-	// Shell completion for project names. Cobra calls this with whatever
-	// the user has typed so far ("toComplete") and the prior args. We
-	// return all registered project names — cobra filters by prefix.
-	//
-	// We wire the same function on every command that takes a <name> as
-	// its first argument: bare boo (switch), delete, save, edit,
-	// set-layout, show. `set-layout` also has a second positional
-	// (template) which we wire separately below.
+	// Shell completion: return all registered project names; cobra filters by prefix.
+	// Wired on every command that takes <name> as first positional.
 	completeProjectNames := func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
-		// On commands that take exactly one project name, suppress
-		// completion past the first arg.
 		if len(args) >= 1 {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -94,9 +85,7 @@ Run 'boo doctor' to verify your environment.`,
 				return completeTemplateNames(cmd, args, toComplete)
 			}
 		case "new":
-			// `boo new` takes a name but it's a NEW name — no
-			// useful completion candidates. Suppress file
-			// completion so the shell doesn't offer files.
+			// `boo new` takes a new name; suppress file completion.
 			sub.ValidArgsFunction = func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}

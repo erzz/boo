@@ -7,27 +7,9 @@ import (
 	"github.com/erzz/boo/internal/layout"
 )
 
-// These tests pin down the merge contract for `boo save` under the tree
-// model. The whole point of the merge is to make the common case
-// (re-save after cd-ing inside panes with no shape change) NON-lossy,
-// while still surfacing genuine data loss (closed panes that held
-// command/env, dropped tabs, etc.).
-//
-// Key shift from the flat model: capture is irreversibly flat (Ghostty
-// gives us a per-tab terminal list, no tree). The merge therefore has
-// two modes:
-//
-//   - Same leaf count as prev → preserve prev's tree shape (and its
-//     interior directions), zip captured cwd onto each leaf in DFS
-//     order, carry forward all invisibles. Lossless.
-//   - Different leaf count → rebuild as a right-leaning row chain from
-//     captured (matches "user pressed Cmd-D N-1 times"). Carry forward
-//     invisibles up to min(leafCount), report dropped tail as lossy.
-//
-// Each test names the user scenario it represents — if a test name
-// stops matching the user story, the merge is wrong, not the test.
-//
-// Note: leaf/row/col/tab/lay helpers live in save_diff_test.go.
+// save_merge_test.go pins the merge contract for `boo save`:
+// same leaf count → lossless tree-shape + cwd zip; different count → right-leaning row chain with lossy report.
+// leaf/row/col/tab/lay helpers live in save_diff_test.go.
 
 // scenarios -------------------------------------------------------------
 

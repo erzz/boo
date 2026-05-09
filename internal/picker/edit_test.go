@@ -6,15 +6,12 @@ import (
 	"testing"
 )
 
-// editModel returns a sized model with edit-related callbacks wired so
-// the `e` key is live and EditIntent dispatches go through onEdit.
-// Mirrors the shape of modelWithDelete / setLayoutModelWithNames.
+// editModel returns a sized model with edit callbacks wired so 'e' is live and EditIntent dispatches via onEdit.
+// Mirrors modelWithDelete / setLayoutModelWithNames.
 func editModel(t *testing.T, items ...Item) (*model, *[]string) {
 	t.Helper()
 	m := sizedModel(120, items...)
-	// sizedModel/newTestModel don't initialise the form (production
-	// Run() does). The 'e' key path mutates form inputs, so we need a
-	// real formModel here.
+	// sizedModel/newTestModel don't init the form (production Run() does); 'e' path needs a real formModel.
 	m.form = newFormModel(FormDefaults{}, defaultTheme())
 	m.form.setLayoutNames([]string{"1x1x1", "triple"})
 	m.layoutNames = []string{"1x1x1", "triple"}
@@ -28,8 +25,7 @@ func editModel(t *testing.T, items ...Item) (*model, *[]string) {
 	return m, &calls
 }
 
-// Form-level tests: edit mode flips the title, hides From, and skips
-// the hidden field during focus traversal.
+// Form-level tests: edit mode flips the title, hides From, and skips it during focus traversal.
 
 func TestForm_EditMode_TitleAndHiddenFrom(t *testing.T) {
 	f := newFormModel(FormDefaults{Name: "alpha", Dir: "/tmp/a", Template: "triple"}, defaultTheme())
@@ -136,8 +132,7 @@ func TestForm_TryCommit_NewModeStillReturnsNewProjectIntent(t *testing.T) {
 	}
 }
 
-// Picker-level tests: 'e' opens form pre-populated; runIntent dispatches
-// EditIntent to onEdit and refreshes; errors land on screenError.
+// Picker-level tests: 'e' opens form pre-populated; runIntent dispatches EditIntent; errors → screenError.
 
 func TestList_EPressOpensEditFormPrePopulated(t *testing.T) {
 	m, calls := editModel(t,
@@ -189,8 +184,7 @@ func TestEditIntent_DispatchesOnEditAndRefreshes(t *testing.T) {
 	_, cmd := m.runIntent(EditIntent{
 		OldName: "alpha", NewName: "beta", NewDir: "/tmp/b", NewTemplate: "triple",
 	})
-	// startEnrich() returns a tea.Cmd that calls RefreshItems asynchronously.
-	// Execute it manually here so the counter is visible synchronously in the test.
+	// startEnrich returns a tea.Cmd that calls RefreshItems async; execute manually for synchronous assertion.
 	if cmd != nil {
 		cmd()
 	}
@@ -228,9 +222,8 @@ func TestEditIntent_OnEditError_ShowsErrorScreen(t *testing.T) {
 	}
 }
 
-// Esc out of an edit-mode form returns to the list AND clears editMode
-// so the next form open (e.g. + New project) doesn't inherit the
-// hidden-From / "Edit project" title state.
+// TestForm_EscFromEditMode_ClearsEditMode: Esc from edit-mode form returns to list AND clears editMode
+// so the next form open (e.g. "+ New project") doesn't inherit the hidden-From / "Edit project" state.
 func TestForm_EscFromEditMode_ClearsEditMode(t *testing.T) {
 	m, _ := editModel(t,
 		Item{Key: "alpha", Title: "alpha", Description: "/tmp/a", Layout: "triple"},

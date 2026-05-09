@@ -13,30 +13,11 @@ import (
 	"github.com/erzz/boo/internal/layoutpreview"
 )
 
-// previewWidth is the target width for layout previews shown by `boo
-// layouts`. Wide enough to fit the canonical 1+2 (`triple`) shape with
-// readable cells, narrow enough to land cleanly on an 80-col terminal
-// after the 2-space indent we add for visual grouping.
+// previewWidth is the ASCII preview width for `boo layouts` — fits triple-pane on 80-col terminals.
 const previewWidth = 50
 
-// newLayoutsCmd implements `boo layouts`: list every available layout
-// template (built-in + user) with its description and an ASCII preview.
-//
-// This is the primary discovery surface for the layout system. A user
-// who's never edited a YAML file should be able to run `boo layouts`,
-// see what shapes ship with boo, and pick one for `boo new --layout`.
-//
-// Output structure per template:
-//
-//	<name>                                 [built-in|user]
-//	  <path>
-//	  <description>
-//
-//	  <preview>
-//
-// User templates that shadow built-ins (same name) are listed once,
-// with the user version winning. We mark them [user] so it's obvious
-// which version the user is seeing.
+// newLayoutsCmd implements `boo layouts` — list every layout template (built-in + user)
+// with its description and an ASCII preview.
 func newLayoutsCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
@@ -73,16 +54,8 @@ layouts. To create a custom layout, drop a <name>.yaml in
 	return cmd
 }
 
-// layoutsJSONEntry is the per-template record emitted by `boo layouts
-// --json`. The ASCII preview is omitted because it's purely a TTY
-// affordance — JSON consumers that want shape information should
-// inspect the layout structure directly via 'boo show' or by reading
-// the layout file.
-//
-// Error is set (and Source/Path/Description left zero) when a user
-// template fails to parse. The human listing surfaces these inline
-// with [error]; JSON consumers see the same information so a tool
-// can warn rather than silently dropping the broken template.
+// layoutsJSONEntry is the per-template record for `boo layouts --json`.
+// ASCII preview omitted (TTY affordance only). Non-empty Error signals a broken user template.
 type layoutsJSONEntry struct {
 	Name        string `json:"name"`
 	Source      string `json:"source,omitempty"` // "builtin" or "user"
@@ -101,10 +74,7 @@ func runLayoutsJSON(a *app, w io.Writer) error {
 	for _, name := range names {
 		r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, name)
 		if err != nil {
-			// Mirror the human listing: surface broken
-			// templates rather than hiding them. Tools can
-			// detect a non-empty error field and flag the
-			// template for the user.
+			// Surface broken templates rather than hiding them.
 			out = append(out, layoutsJSONEntry{
 				Name:  name,
 				Error: err.Error(),
@@ -127,18 +97,14 @@ func runLayoutsJSON(a *app, w io.Writer) error {
 	return enc.Encode(out)
 }
 
-// runLayouts is the testable core of `boo layouts`. Extracted from
-// RunE so we can pass a fake out/Paths in tests without standing up a
-// full app instance.
+// runLayouts is the testable core of `boo layouts` (extracted from RunE).
 func runLayouts(a *app, out io.Writer) error {
 	names, err := layout.ListTemplates(a.Paths.LayoutsDir)
 	if err != nil {
 		return fmt.Errorf("list layouts: %w", err)
 	}
 	if len(names) == 0 {
-		// Defensive: built-ins are embedded so this should never
-		// happen. If it does, something is very wrong with the
-		// binary build — say so rather than silently print nothing.
+		// Defensive: built-ins are embedded; if this fires the binary build is broken.
 		return fmt.Errorf("no layout templates available (built-ins missing from binary?)")
 	}
 	sort.Strings(names)
@@ -149,10 +115,7 @@ func runLayouts(a *app, out io.Writer) error {
 		}
 		r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, name)
 		if err != nil {
-			// One bad user template shouldn't kill the whole
-			// listing — surface the error inline and keep going.
-			// This matches what a user expects: "show me what's
-			// here, including what's broken."
+			// Surface error inline so one bad template doesn't kill the whole listing.
 			_, _ = fmt.Fprintf(out, "%s    [error]\n  %v\n", name, err)
 			continue
 		}
@@ -167,9 +130,7 @@ func writeLayoutEntry(w io.Writer, r layout.ResolvedTemplate) {
 	if r.Source == layout.SourceUser {
 		source = "[user]"
 	}
-	// Right-align the source tag to a fixed column so the listing
-	// scans cleanly regardless of name length. Truncate names that
-	// would push past the tag column rather than disrupt alignment.
+	// Right-align source tag to a fixed column; truncate long names rather than break alignment.
 	const tagCol = 40
 	name := r.Layout.Name
 	if name == "" {
@@ -189,8 +150,7 @@ func writeLayoutEntry(w io.Writer, r layout.ResolvedTemplate) {
 	}
 	_, _ = fmt.Fprintln(w)
 
-	// Preview: indent each line by 2 spaces to group it visually
-	// with the metadata above.
+	// Indent preview 2 spaces to group visually with the metadata above.
 	preview := layoutpreview.RenderLayout(r.Layout, previewWidth)
 	for _, line := range strings.Split(preview, "\n") {
 		_, _ = fmt.Fprintf(w, "  %s\n", line)

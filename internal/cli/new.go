@@ -20,10 +20,8 @@ import (
 
 func newNewCmd() *cobra.Command { return newNewCmdWithApp(nil) }
 
-// newNewCmdWithApp is like newNewCmd but uses appIn instead of calling
-// newApp() inside RunE.  Pass nil to get normal production behaviour.
-// Used by tests to inject a fake *app so cobra flag-parsing is exercised
-// without touching the real filesystem, git, or Ghostty.
+// newNewCmdWithApp is like newNewCmd but accepts a pre-built *app for testing.
+// Pass nil for production behaviour.
 func newNewCmdWithApp(appIn *app) *cobra.Command {
 	var (
 		fromURL    string
@@ -64,9 +62,8 @@ flags act as form pre-population and the user can edit before submitting.`,
 				}
 			}
 
-			// Build form defaults from flags + cwd inspection. Flag values
-			// always win; only unset fields fall back to detection.
-			defs, err := buildNewProjectDefaults(a, defaultsFromFlags{
+		// Build form defaults from flags + cwd inspection. Flags always win.
+		defs, err := buildNewProjectDefaults(a, defaultsFromFlags{
 				name:     firstArg(args),
 				dir:      existing,
 				from:     fromURL,
@@ -77,11 +74,8 @@ flags act as form pre-population and the user can edit before submitting.`,
 				return err
 			}
 
-			// --yes is the non-interactive escape hatch. It requires a fully
-			// resolved intent (everything that a successful form submission
-			// would produce). If anything is missing, we error rather than
-			// silently dropping into the TUI on a script.
-			if yes {
+		// --yes is the non-interactive escape hatch. Error if anything required is missing.
+		if yes {
 				intent := defaultsToIntent(defs)
 				if err := validateIntent(intent); err != nil {
 					return fmt.Errorf("--yes was given but %w", err)
@@ -105,11 +99,9 @@ flags act as form pre-population and the user can edit before submitting.`,
 			if res.Cancelled() {
 				return nil
 			}
-			// User may have switched to an existing project from the
-			// AlreadyRegistered prompt — but in form-only mode we never show
-			// that prompt, so this branch shouldn't fire. Handle it safely
-			// regardless.
-			switch v := res.Intent.(type) {
+		// User may have switched to an existing project from the AlreadyRegistered prompt.
+		// In form-only mode that prompt is never shown, but handle it safely regardless.
+		switch v := res.Intent.(type) {
 			case picker.SwitchIntent:
 				p, err := project.Load(a.Paths)
 				if err != nil {
@@ -150,38 +142,24 @@ type defaultsFromFlags struct {
 	name, dir, from, into, template string
 }
 
-// buildNewProjectDefaults assembles the form defaults shown in the TUI (or
-// pre-resolves the intent for --yes mode).
-//
-// Resolution order, per field:
-//
-//   - flags win
-//   - then: cwd inspection (basename, git remote)
-//   - then: hard-coded defaults (form supplies "triple" when blank)
-//
-// AlreadyRegisteredAs is filled when the resolved Dir matches an existing
-// registered project — the TUI then prompts "switch or continue?".
+// buildNewProjectDefaults assembles form defaults for TUI pre-population and --yes mode.
+// Resolution order per field: flags → cwd inspection (basename, git remote) → hardcoded defaults.
+// AlreadyRegisteredAs is filled when the resolved Dir is already registered.
 func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults, error) {
 	cwd, _ := os.Getwd()
 
-	// Directory: explicit --dir wins; otherwise --into (for clones); for
-	// non-clone flows fall back to cwd (register the directory you're in).
-	// For clone flows with no explicit destination, derive the destination
-	// from the URL so the form shows the actual target rather than cwd.
+	// Directory resolution: explicit --dir wins; then --into (for clones); then cwd or URL-derived.
 	dir := strings.TrimSpace(fl.dir)
 	if dir == "" {
 		dir = strings.TrimSpace(fl.into)
 	}
 	if dir == "" && fl.from == "" {
-		// Non-clone flow: default to the current working directory so
-		// "boo new" inside a git repo pre-fills the form with that dir.
+		// Non-clone flow: default to cwd so "boo new" inside a git repo pre-fills the form.
 		dir = cwd
 	}
 	if dir == "" && fl.from != "" {
-		// Clone flow: derive the destination from the URL the same way
-		// runCreateProject will, so the form shows the real target.
-		// Best-effort: if resolution fails (e.g. malformed URL) leave
-		// dir empty; the form can still be submitted with a manual path.
+		// Clone flow: derive destination from URL so the form shows the real target.
+		// Best-effort: if resolution fails, leave dir empty; the form accepts manual input.
 		expanded := expandRepoShorthand(fl.from, a.Config.GitDefaultRemoteOr(""))
 		if derived, err := resolveCloneDestination("", expanded, a.Config.ProjectsDirOr("")); err == nil {
 			dir = derived
@@ -193,8 +171,7 @@ func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults,
 		}
 	}
 
-	// Git remote: only inspected when dir exists. Best-effort; absent remote
-	// is normal.
+	// Git remote: best-effort, absent is normal.
 	var gitRemote, repoName string
 	if dirExists(dir) {
 		if remote, err := readGitRemote(dir); err == nil && remote != "" {
@@ -203,9 +180,7 @@ func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults,
 		}
 	}
 
-	// Name: explicit positional arg wins; otherwise the git-derived repo name
-	// (preferred when distinct from the path basename); otherwise basename of
-	// the resolved dir; for clone flows with a known URL, derive from the URL.
+	// Name: explicit positional arg wins; then git-derived repo name; then dir basename; then URL.
 	name := strings.TrimSpace(fl.name)
 	if name == "" {
 		if repoName != "" {
@@ -218,8 +193,7 @@ func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults,
 		}
 	}
 
-	// Already-registered detection: only meaningful when we're suggesting an
-	// existing dir. For clone flows the dir doesn't exist yet, so skip.
+	// Already-registered detection: only when dir exists and not a clone flow.
 	var alreadyAs string
 	if dirExists(dir) && fl.from == "" {
 		reg, err := project.Load(a.Paths)
@@ -230,10 +204,8 @@ func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults,
 		}
 	}
 
-	// When no --layout was given, leave Template empty here. The form
-	// (newFormModel) supplies its own default ("triple"); duplicating it
-	// here would mean the migration has to update two places every time
-	// the default changes. Single source of truth lives in the form.
+	// Leave Template empty; the form supplies its own default ("triple").
+	// Single source of truth lives in the form, not here.
 	template := strings.TrimSpace(fl.template)
 
 	return picker.FormDefaults{
@@ -247,12 +219,8 @@ func buildNewProjectDefaults(a *app, fl defaultsFromFlags) (picker.FormDefaults,
 	}, nil
 }
 
-// defaultsToIntent converts a fully-specified set of defaults into an intent.
-// Used by --yes mode to skip the form when the caller has supplied enough.
-//
-// If Template was left blank (no --layout flag), we apply DefaultLayout
-// here so --yes honours the user's configured default. The form path
-// applies the same fallback inside collect().
+// defaultsToIntent converts fully-specified defaults into an intent for --yes mode.
+// If Template is blank, applies DefaultLayout so --yes honours the user's configured default.
 func defaultsToIntent(d picker.FormDefaults) *picker.NewProjectIntent {
 	tpl := d.Template
 	if tpl == "" {
@@ -279,21 +247,13 @@ func validateIntent(i *picker.NewProjectIntent) error {
 	return nil
 }
 
-// runCreateProject performs the actual registration (and clone, if From is
-// set). Lifted out of the cobra RunE so it can be called from both the
-// CLI flag-driven path and the interactive form's submission path.
-//
-// Concurrency: clones run outside the registry lock so slow network IO
-// doesn't block other boo invocations. The lock is taken only for the
-// read-modify-write window on the registry itself.
+// runCreateProject performs the actual registration (and clone if From is set).
+// Clones run outside the registry lock; the lock is taken only for the registry write.
 func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectIntent, out io.Writer) error {
 	if err := project.ValidateName(intent.Name); err != nil {
 		return err
 	}
-	// When both From and Dir are set we treat Dir as the clone destination
-	// ("into") rather than rejecting, so the TUI can pre-populate Dir from
-	// a derived clone destination. No special branch needed — the clone
-	// path below already does the right thing.
+	// When both From and Dir are set, treat Dir as the clone destination.
 	if intent.From == "" && intent.Dir == "" {
 		return errors.New("either Directory or Clone from URL is required")
 	}
@@ -314,13 +274,10 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 	// Resolve directory.
 	var dir string
 	if intent.From != "" {
-		// Apply git default-remote shorthand expansion: a bare repo
-		// name like "boo" becomes "<git.default_remote>/boo". A full
-		// URL is left alone. See expandRepoShorthand for the rules.
+		// Apply git default-remote shorthand expansion (bare "boo" → "<remote>/boo").
 		intent.From = expandRepoShorthand(intent.From, a.Config.GitDefaultRemoteOr(""))
 
-		// Clone flow. If Dir was provided treat it as --into; otherwise
-		// derive from the URL relative to projects_dir (or cwd).
+		// If Dir was provided treat it as --into; otherwise derive from the URL.
 		if intent.Dir != "" {
 			abs, err := filepath.Abs(intent.Dir)
 			if err != nil {
@@ -383,9 +340,7 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 		}
 		_, _ = fmt.Fprintf(out, "Registered %q at %s (layout: %s)\n", intent.Name, dir, l.Name)
 
-		// Auto-launch after creation. Matches the user expectation that
-		// "registering" a new project also opens it (mirrors the pre-form
-		// behaviour of `boo new`).
+		// Auto-launch after creation (matches user expectation that "registering" also opens).
 		p, err := reg.Get(intent.Name)
 		if err != nil {
 			return err
@@ -394,9 +349,8 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 	})
 }
 
-// preCheckCollisions surfaces obvious name/dir collisions before kicking off
-// a (potentially slow) clone. Same checks are repeated under the lock later
-// — this is purely a UX improvement.
+// preCheckCollisions surfaces name/dir collisions before a potentially slow clone.
+// Same checks are repeated under the lock later — this is a UX improvement only.
 func preCheckCollisions(a *app, name, dir string) error {
 	reg, err := project.Load(a.Paths)
 	if err != nil {
@@ -412,14 +366,10 @@ func preCheckCollisions(a *app, name, dir string) error {
 	return nil
 }
 
-// readGitRemote returns the URL of the `origin` remote for the git repo at
-// dir, or "" if dir is not a git repo / has no origin / git is unavailable.
-//
-// We shell out directly to os/exec rather than going through internal/exec's
-// Runner because Runner doesn't model a working directory (it would force a
-// chdir on the boo process — unsafe with concurrent invocations). The call
-// is informational, best-effort, and never fatal: any error is swallowed by
-// the caller and the form just won't pre-populate.
+// readGitRemote returns the URL of the `origin` remote for the git repo at dir,
+// or "" if unavailable. Shells out directly to os/exec (not Runner) because
+// Runner doesn't model a working directory — a chdir on the boo process would be
+// unsafe with concurrent invocations. Call is informational and never fatal.
 func readGitRemote(dir string) (string, error) {
 	cmd := exec.Command("git", "remote", "get-url", "origin")
 	cmd.Dir = dir
@@ -430,12 +380,9 @@ func readGitRemote(dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// repoNameFromRemoteURL is a defensive copy of the git package's URL parser.
-// We don't import internal/git here because that package only exposes a
-// Cloner; pulling in DeriveDestination would create a small dependency
-// cycle risk if git ever needs to call back into anything in cli/.
-//
-// Returns "" if the URL doesn't look like a clone URL we recognise.
+// repoNameFromRemoteURL extracts the repo name from a clone URL.
+// Local copy avoids importing internal/git (which only exposes a Cloner).
+// Returns "" if the URL isn't a recognisable clone URL.
 func repoNameFromRemoteURL(url string) string {
 	url = strings.TrimSpace(url)
 	if url == "" {

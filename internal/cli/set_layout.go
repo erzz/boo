@@ -9,26 +9,10 @@ import (
 	"github.com/erzz/boo/internal/project"
 )
 
-// newSetLayoutCmd implements `boo set-layout <name> <template>` —
-// re-resolve the named template and write it as the project's saved
-// layout, replacing whatever was there.
-//
-// This is the missing partner of `boo new --layout`: it lets users
-// switch a project to a different template without delete+recreate.
-// Authored a new template? Point an existing project at it. Want to
-// reset a hand-edited layout to a clean built-in? Run set-layout with
-// the template name and your edits are gone.
-//
-// Caveats:
-//   - Any hand-edits to layout.yaml are lost. There is no diff/confirm
-//     step; this is a destructive replace by design (matches the user
-//     intent "give me this template's layout, period").
-//   - The registry's Layout field (display only) is updated to the new
-//     template name so `boo list` shows the right thing.
-//   - We do NOT auto-launch the project after switching. The next
-//     `boo <name>` will pick up the new layout. Auto-launching could
-//     close panes the user is working in, which is the kind of
-//     surprise we'd rather avoid.
+// newSetLayoutCmd implements `boo set-layout <name> <template>` — re-resolves the named
+// template and writes it as the project's saved layout, replacing whatever was there.
+// Hand-edits to layout.yaml are lost by design ("give me this template, period").
+// The registry's Layout display field is updated; the project is NOT auto-launched.
 func newSetLayoutCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set-layout <name> <template>",
@@ -61,12 +45,9 @@ Run 'boo layouts' to see available templates.`,
 	}
 }
 
-// executeSetLayout resolves the template, writes the per-project layout
-// snapshot, and updates the registry's Layout field — all under the
-// state lock. Used by both the `boo set-layout` command and the
-// bare-`boo` TUI dispatch (SetLayoutIntent), which is why it doesn't
-// print anything itself: callers tailor the success message to their
-// context (CLI prints, TUI re-enters the picker silently).
+// executeSetLayout resolves the template, writes the per-project layout snapshot, and updates
+// the registry's Layout field — all under the state lock. Used by `boo set-layout` and the
+// TUI's SetLayoutIntent. Does not print; callers tailor the success message.
 func executeSetLayout(a *app, name, template string) error {
 	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, template)
 	if err != nil {

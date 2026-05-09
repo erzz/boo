@@ -5,19 +5,15 @@ import (
 	"testing"
 )
 
-// Default exists so callers that can't resolve a real template still get a
-// well-formed Layout. The contract: it must validate. Anything else is
-// implementation detail.
+// TestDefault_IsValid: Default() must produce a well-formed, validating Layout.
 func TestDefault_IsValid(t *testing.T) {
 	if err := Default().Validate(); err != nil {
 		t.Fatalf("Default invalid: %v", err)
 	}
 }
 
-// Round-trip via Marshal+Parse on a non-trivial tree. This is the load-bearing
-// invariant for `boo save`: write to disk, read back, get the same structure.
-// We exercise both leaf and interior splits, both directions, and per-leaf
-// optional fields (command, env, initial_input).
+// TestParse_RoundTrip: Marshal+Parse on a non-trivial tree must round-trip cleanly.
+// Exercises leaf/interior splits, both directions, and per-leaf optional fields (command, env, initial_input).
 func TestParse_RoundTrip(t *testing.T) {
 	in := Layout{
 		Name: "round-trip",
@@ -65,16 +61,14 @@ func TestParse_RoundTrip(t *testing.T) {
 	if right.Direction != DirColumn || len(right.Children) != 2 {
 		t.Fatalf("tab 1 right child should be column of 2; got %+v", right)
 	}
-	// Per-leaf optional carry-through that bit us once before in TOML
-	// land — env was dropping silently.
+	// env drop (was a regression in TOML land)
 	gotEnv := right.Children[1].Env["LOG_LEVEL"]
 	if gotEnv != "debug" {
 		t.Fatalf("env dropped on round-trip: got %q", gotEnv)
 	}
 }
 
-// Each Validate failure mode is its own test case. Naming each case after
-// the user-visible mistake makes it obvious from `go test -v` what regressed.
+// TestValidate_Errors: each Validate failure mode in its own case; name matches the user-visible mistake.
 func TestValidate_Errors(t *testing.T) {
 	leaf := Split{Cwd: "."}
 	cases := []struct {
@@ -128,12 +122,10 @@ func TestValidate_Errors(t *testing.T) {
 	}
 }
 
-// MaxDepth must reject pathological nesting before any downstream code
-// (renderer, JXA walker) gets a chance to misbehave. We build a chain
-// MaxDepth+1 deep and confirm it errors with a useful message.
+// TestValidate_RejectsExcessiveDepth: chains MaxDepth+1 deep must fail with "nested too deep".
 func TestValidate_RejectsExcessiveDepth(t *testing.T) {
 	leaf := Split{Cwd: "."}
-	// Chain of nested rows: each level wraps the previous in row[leaf, prev].
+	// Build a row chain MaxDepth+1 levels deep.
 	cur := leaf
 	for i := 0; i <= MaxDepth; i++ {
 		cur = Split{Direction: DirRow, Children: []Split{leaf, cur}}
@@ -148,10 +140,7 @@ func TestValidate_RejectsExcessiveDepth(t *testing.T) {
 	}
 }
 
-// TestParse_UnknownFieldErrors ensures that typos in YAML field names are
-// rejected rather than silently ignored.  A user who writes `windws:` instead
-// of `windows:` (or similar) would otherwise see their layout silently revert
-// to the default — strict decoding surfaces the mistake immediately.
+// TestParse_UnknownFieldErrors: typos in YAML field names must error, not silently revert to default.
 func TestParse_UnknownFieldErrors(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -199,10 +188,8 @@ tabs:
 	}
 }
 
-// IsLeaf is the canonical predicate downstream code branches on. If its
-// definition drifts from Validate's, things will misbehave silently
-// (renderer rendering the wrong shape, JXA splitting the wrong terminal).
-// Pin it down here.
+// TestIsLeaf_Contract: IsLeaf predicate must stay consistent with Validate;
+// drift between them would cause renderer/JXA to branch incorrectly.
 func TestIsLeaf_Contract(t *testing.T) {
 	leaf := Split{Cwd: "."}
 	if !leaf.IsLeaf() {

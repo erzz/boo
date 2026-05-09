@@ -20,10 +20,7 @@ import (
 
 func newDoctorCmd() *cobra.Command { return newDoctorCmdWithRunner(nil) }
 
-// newDoctorCmdWithRunner is like newDoctorCmd but uses runnerIn instead of
-// booexec.NewReal() inside RunE.  Pass nil for production behaviour.
-// Used by tests to inject a fake runner so doctor's cobra path is exercised
-// without needing a live Ghostty or real osascript.
+// newDoctorCmdWithRunner is like newDoctorCmd but injects runnerIn for tests. Pass nil for production.
 func newDoctorCmdWithRunner(runnerIn booexec.Runner) *cobra.Command {
 	var jsonOut bool
 	cmd := &cobra.Command{
@@ -39,10 +36,7 @@ func newDoctorCmdWithRunner(runnerIn booexec.Runner) *cobra.Command {
 				runner = booexec.NewReal()
 			}
 			client := ghostty.New(runner)
-			// Doctor must run even if config is broken — it's the
-			// command users will reach for to diagnose that exact
-			// situation. Resolve paths directly (not via newApp,
-			// which would itself call config.Load and fail early).
+			// Doctor must run even if config is broken — resolve paths directly, not via newApp.
 			paths, err := state.Default()
 			if err != nil {
 				return err
@@ -72,11 +66,9 @@ func newDoctorCmdWithRunner(runnerIn booexec.Runner) *cobra.Command {
 	return cmd
 }
 
-// validateUserThemes returns the names of user theme files in dir
-// that fail to parse. Built-ins are skipped — they're embedded and
-// validated at build time. We intentionally don't surface the full
-// parse error here; `boo themes` already does that. Doctor just
-// flags that something is broken so the user knows to look.
+// validateUserThemes returns the names of user theme files in dir that fail to parse.
+// Built-ins are skipped (embedded, validated at build time). Doctor uses this to flag
+// broken user themes; `boo themes` shows the full parse error.
 func validateUserThemes(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -92,9 +84,7 @@ func validateUserThemes(dir string) ([]string, error) {
 			continue
 		}
 		stem := strings.TrimSuffix(name, ".yaml")
-		// Resolve via the package so we exercise the same code
-		// path the picker uses. The validation is just "does
-		// Resolve return an error?" — simple and honest.
+		// Resolve via the same code path the picker uses.
 		if _, err := theme.Resolve(dir, stem); err != nil {
 			broken = append(broken, stem)
 		}
@@ -111,8 +101,7 @@ func renderResults(w io.Writer, results []doctor.Result) {
 	}
 }
 
-// doctorResultJSON is the JSON shape for a single check result in
-// `boo doctor --json`. Status is serialised as the string OK/SKIP/WARN/FAIL.
+// doctorResultJSON is the JSON shape for a single check result in `boo doctor --json`.
 type doctorResultJSON struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
@@ -120,10 +109,7 @@ type doctorResultJSON struct {
 	Hint   string `json:"hint,omitempty"`
 }
 
-// renderResultsJSON writes the check results as a JSON array to w.
-// Each element carries name, status (string), detail, and hint.
-// Exit-code semantics (non-zero on FAIL) are preserved by the caller
-// and are independent of this function.
+// renderResultsJSON writes check results as a JSON array. Exit-code semantics are the caller's concern.
 func renderResultsJSON(w io.Writer, results []doctor.Result) error {
 	out := make([]doctorResultJSON, len(results))
 	for i, r := range results {

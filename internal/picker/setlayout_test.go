@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// helper: build a model with cycler-mode wired (LayoutNames + a stub
-// preview callback + a stub OnSetLayout). Mirrors how the CLI populates
-// Options.
+// setLayoutModelWithNames builds a model with cycler-mode wired (LayoutNames + preview stub + OnSetLayout stub).
+// Mirrors how the CLI populates Options.
 func setLayoutModelWithNames(t *testing.T, names []string, items ...Item) (*model, *[]string) {
 	t.Helper()
 	m := sizedModel(120, items...)
@@ -22,8 +21,7 @@ func setLayoutModelWithNames(t *testing.T, names []string, items ...Item) (*mode
 	return m, &calls
 }
 
-// Pressing 'l' on a project Item opens the set-layout sub-screen
-// pre-positioned at the project's current template.
+// TestList_LPressOpensSetLayoutAtCurrentTemplate: 'l' opens set-layout sub-screen anchored at the project's current template.
 func TestList_LPressOpensSetLayoutAtCurrentTemplate(t *testing.T) {
 	m, _ := setLayoutModelWithNames(t,
 		[]string{"1x1", "triple", "2x2x2"},
@@ -46,8 +44,7 @@ func TestList_LPressOpensSetLayoutAtCurrentTemplate(t *testing.T) {
 	}
 }
 
-// Pressing 'l' when no LayoutNames were configured (e.g. selection-only
-// pickers) is a no-op rather than opening an empty cycler.
+// TestList_LPressNoNamesIsNoop: 'l' with no LayoutNames configured is a no-op (no empty cycler).
 func TestList_LPressNoNamesIsNoop(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/a"})
 	// Deliberately do NOT set m.layoutNames.
@@ -57,7 +54,7 @@ func TestList_LPressNoNamesIsNoop(t *testing.T) {
 	}
 }
 
-// ←/→ (and h/l) cycle through the template list with wraparound.
+// TestSetLayout_CycleWrapsBothDirections: ←/→ (and h/l) cycle through the template list with wraparound.
 func TestSetLayout_CycleWrapsBothDirections(t *testing.T) {
 	m, _ := setLayoutModelWithNames(t,
 		[]string{"a", "b", "c"},
@@ -80,9 +77,7 @@ func TestSetLayout_CycleWrapsBothDirections(t *testing.T) {
 	}
 }
 
-// Enter on the cycler invokes the OnSetLayout callback with the
-// highlighted template, then returns to the list. No intent is set
-// (the action was handled in-loop).
+// TestSetLayout_EnterInvokesCallback: Enter calls OnSetLayout with the highlighted template, returns to list.
 func TestSetLayout_EnterInvokesCallback(t *testing.T) {
 	m, calls := setLayoutModelWithNames(t,
 		[]string{"a", "b", "c"},
@@ -103,7 +98,7 @@ func TestSetLayout_EnterInvokesCallback(t *testing.T) {
 	}
 }
 
-// Esc returns to the list with no intent set.
+// TestSetLayout_EscReturnsToList: Esc returns to screenList with no intent.
 func TestSetLayout_EscReturnsToList(t *testing.T) {
 	m, _ := setLayoutModelWithNames(t,
 		[]string{"a", "b"},
@@ -119,9 +114,7 @@ func TestSetLayout_EscReturnsToList(t *testing.T) {
 	}
 }
 
-// If the project's current template isn't in the names list (e.g. a
-// user-defined template that got deleted), the cycler still opens —
-// just anchored at index 0 — rather than erroring.
+// TestSetLayout_UnknownAnchorFallsBackToZero: project template not in names list → cycler anchors at index 0.
 func TestSetLayout_UnknownAnchorFallsBackToZero(t *testing.T) {
 	m, _ := setLayoutModelWithNames(t,
 		[]string{"a", "b"},

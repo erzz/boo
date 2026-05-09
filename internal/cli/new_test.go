@@ -82,7 +82,7 @@ func TestDefaultsToIntent_PreservesFields(t *testing.T) {
 		Dir:                 "/some/path",
 		From:                "https://x",
 		Template:            "dev",
-		GitRemote:           "origin → ...",    // info-only; not in intent
+		GitRemote:           "origin → ...",    // info-only; not propagated to intent
 		AlreadyRegisteredAs: "should-not-leak", // ditto
 	}
 	got := defaultsToIntent(d)
@@ -107,10 +107,7 @@ func TestFirstArg(t *testing.T) {
 }
 
 func TestDefaultsToIntent_AppliesDefaultLayoutWhenTemplateBlank(t *testing.T) {
-	// --yes path: no --layout flag, but config sets default_layout.
-	// The intent must carry the configured default through to
-	// runCreateProject so the user's preference is honoured even
-	// without the form.
+	// --yes with no --layout: config's default_layout must be carried into the intent.
 	d := picker.FormDefaults{
 		Name:          "alpha",
 		Dir:           "/x",
@@ -124,7 +121,7 @@ func TestDefaultsToIntent_AppliesDefaultLayoutWhenTemplateBlank(t *testing.T) {
 }
 
 func TestDefaultsToIntent_ExplicitTemplateBeatsDefault(t *testing.T) {
-	// Explicit --layout flag must always beat the configured default.
+	// Explicit --layout must always beat the configured default.
 	d := picker.FormDefaults{
 		Name:          "alpha",
 		Dir:           "/x",
@@ -161,10 +158,8 @@ func TestExpandRepoShorthand(t *testing.T) {
 	}
 }
 
-// TestBuildNewProjectDefaults_CloneFlow_DerivesDirFromURL checks that when
-// --from is given and no --dir/--into, the form's Dir is derived from the URL
-// (not set to cwd).  This prevents the bug where cloning would happen into the
-// current directory instead of a subdirectory named after the repo.
+// TestBuildNewProjectDefaults_CloneFlow_DerivesDirFromURL: --from with no --dir/--into
+// must derive Dir from the URL (not use cwd).
 func TestBuildNewProjectDefaults_CloneFlow_DerivesDirFromURL(t *testing.T) {
 	a := makeAppForCmds(t)
 	a.Config = config.DefaultConfig()
@@ -181,7 +176,7 @@ func TestBuildNewProjectDefaults_CloneFlow_DerivesDirFromURL(t *testing.T) {
 		t.Errorf("Dir = %q, want basename 'myrepo' (derived from URL)", defs.Dir)
 	}
 
-	// Dir must NOT equal the current working directory (that was the bug).
+	// Dir must NOT equal cwd (that was the original bug).
 	cwd, _ := os.Getwd()
 	if defs.Dir == cwd {
 		t.Error("Dir must not be cwd for clone flows — cloning into cwd itself is wrong")
@@ -193,8 +188,7 @@ func TestBuildNewProjectDefaults_CloneFlow_DerivesDirFromURL(t *testing.T) {
 	}
 }
 
-// TestBuildNewProjectDefaults_CloneFlow_ExplicitIntoWins verifies that an
-// explicit --into flag overrides URL-derived destination.
+// TestBuildNewProjectDefaults_CloneFlow_ExplicitIntoWins: explicit --into overrides URL-derived Dir.
 func TestBuildNewProjectDefaults_CloneFlow_ExplicitIntoWins(t *testing.T) {
 	a := makeAppForCmds(t)
 	a.Config = config.DefaultConfig()
@@ -214,8 +208,7 @@ func TestBuildNewProjectDefaults_CloneFlow_ExplicitIntoWins(t *testing.T) {
 	}
 }
 
-// TestBuildNewProjectDefaults_CloneFlow_ExplicitDirWins verifies that an
-// explicit --dir flag overrides URL-derived destination.
+// TestBuildNewProjectDefaults_CloneFlow_ExplicitDirWins: explicit --dir overrides URL-derived Dir.
 func TestBuildNewProjectDefaults_CloneFlow_ExplicitDirWins(t *testing.T) {
 	a := makeAppForCmds(t)
 	a.Config = config.DefaultConfig()
@@ -234,8 +227,7 @@ func TestBuildNewProjectDefaults_CloneFlow_ExplicitDirWins(t *testing.T) {
 	}
 }
 
-// TestBuildNewProjectDefaults_NonCloneFlow_UsesCwd ensures that for the
-// non-clone ("register existing dir") path, Dir still defaults to cwd.
+// TestBuildNewProjectDefaults_NonCloneFlow_UsesCwd: no --from → Dir defaults to cwd.
 func TestBuildNewProjectDefaults_NonCloneFlow_UsesCwd(t *testing.T) {
 	a := makeAppForCmds(t)
 	a.Config = config.DefaultConfig()

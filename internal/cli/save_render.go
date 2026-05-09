@@ -12,10 +12,8 @@ import (
 // predictable across tabs and makes golden tests trivially diffable.
 const renderCellWidth = 12
 
-// renderDiff writes the human-readable before/after view of a SaveDiff to
-// w. Caller is expected to have already printed the "Captured N tab(s),
-// M split(s)…" summary line. renderDiff prints nothing when the outcome
-// is OutcomeSilent — silent saves are silent.
+// renderDiff writes the human-readable before/after view of a SaveDiff to w.
+// Prints nothing for OutcomeSilent.
 func renderDiff(d SaveDiff, w io.Writer) {
 	if d.Outcome == OutcomeSilent {
 		return

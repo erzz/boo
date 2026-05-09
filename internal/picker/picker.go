@@ -44,23 +44,15 @@ type newProjectItem struct{}
 
 func (newProjectItem) FilterValue() string { return "+ New project" }
 
-// Intent is the sealed sum type of "what the user wants to do next" returned
-// by Run. CLI code dispatches on the concrete type via a type switch.
-//
-// New intents are added as new struct types implementing isIntent(). The
-// interface is sealed (unexported method) so external packages can't add
-// variants and break the exhaustive switches in CLI dispatch code.
+// Intent is a sealed sum type returned by Run. CLI dispatches via type switch.
+// The unexported isIntent() method prevents external packages from adding variants.
 type Intent interface{ isIntent() }
 
 // SwitchIntent — user picked an existing project from the list.
 type SwitchIntent struct{ Name string }
 
-// DeleteIntent — user pressed d (or D for purge) on a project row and
-// confirmed the modal. The CLI is responsible for the actual registry
-// removal, state-dir cleanup, and (if Purge) closing the Ghostty window.
-//
-// Confirmation has already happened in the TUI; the CLI should NOT
-// prompt again. (`boo delete --force` semantics.)
+// DeleteIntent — user confirmed delete (d) or purge (D) on a project row.
+// Confirmation happened in TUI; CLI must NOT prompt again.
 type DeleteIntent struct {
 	Name  string
 	Purge bool
@@ -75,15 +67,8 @@ type SetLayoutIntent struct {
 	Template string
 }
 
-// EditIntent — user submitted the edit form for an existing project.
-// OldName is the project's pre-edit key (used to find the row to
-// update); NewName, NewDir, NewTemplate are the desired post-edit
-// values. The CLI side decides whether each constitutes a real change
-// (a no-op edit is fine and silently does nothing).
-//
-// Like Delete and SetLayout, edits are dispatched through the in-TUI
-// action loop via Options.OnEdit; the picker stays open and refreshes
-// the list on success or shows an error screen on failure.
+// EditIntent — user submitted the edit form. OldName is the pre-edit key.
+// CLI decides which field changes are meaningful; no-op edit is fine.
 type EditIntent struct {
 	OldName     string
 	NewName     string
@@ -91,14 +76,8 @@ type EditIntent struct {
 	NewTemplate string
 }
 
-// NewProjectIntent — user submitted the new-project form. The CLI turns
-// this into the actual registry/clone work.
-//
-// Exactly one of Dir or From is meaningful at submit time:
-//
-//   - If From is non-empty, the project will be created by cloning into Dir
-//     (Dir defaults to a sibling of cwd named after the repo).
-//   - Otherwise Dir is the existing directory to register.
+// NewProjectIntent — user submitted the new-project form. Non-empty From
+// means clone into Dir; otherwise Dir is an existing dir to register.
 type NewProjectIntent struct {
 	Name     string
 	Dir      string
@@ -132,130 +111,52 @@ type Options struct {
 	// like `boo delete` where creating a new project from the picker would
 	// make no sense.
 	HideNewProject bool
-	// PreviewTemplate, if set, is called whenever the form's "Layout
-	// template" field changes; the returned string is rendered below the
-	// form as a preview of what the layout will look like. Empty return =
-	// no preview shown (e.g. unknown template name while the user types).
-	//
-	// We pass a callback rather than importing the layout package here so
-	// the picker stays free of project-specific dependencies — the same
-	// reason Item, FormDefaults etc. don't reference internal/project or
-	// internal/ghostty.
+	// PreviewTemplate, if set, is called on every Layout field change; returned string
+	// is rendered below the form. Callback keeps the picker free of layout-package deps.
 	PreviewTemplate func(name string) string
-	// LayoutNames, if non-empty, turns the form's "Layout template" field
-	// from a free-text input into a left/right cycler over this list. The
-	// CLI populates it from layout.ListTemplates so users see exactly the
-	// templates they have available (built-ins + any user overrides) and
-	// can't typo their way into a validation error after submit.
-	//
-	// Empty = back to the legacy free-text input. Useful for tests and
-	// for any future caller that wants the old behaviour.
+	// LayoutNames, if non-empty, turns the Layout template field into a ←/→ cycler.
+	// Empty = free-text input (useful for tests or callers that don't enumerate templates).
 	LayoutNames []string
-	// Theme selects a named visual theme. Empty or unknown names fall
-	// back to the built-in default. The CLI populates this from the
-	// `ui.theme` config key.
+	// Theme selects a named visual theme. Empty or unknown falls back to the built-in default.
 	Theme string
-	// ThemesDir is the directory holding user-authored theme YAML
-	// files (typically ~/.config/boo/themes). Empty means "built-ins
-	// only" — useful in tests and when boo runs on a clean machine.
+	// ThemesDir holds user-authored theme YAML files. Empty = built-ins only.
 	ThemesDir string
-	// ConfigPath is the path to the user's config.yaml. When set,
-	// the picker's `T` keybind writes the newly-selected theme back
-	// to disk (lossless: comments and other keys are preserved) and
-	// includes the key in the help footer. Empty suppresses the key
-	// from help and makes theme cycling session-only (useful in tests
-	// and lightweight callers that don't wire up a full config path).
+	// ConfigPath is the path to config.yaml. When set, T persists the new theme to disk.
+	// Empty suppresses the T keybind from help and makes theme cycling session-only.
 	ConfigPath string
-	// PreviewProject, if set, is called whenever the cursor moves to a
-	// project row in the list; the returned multi-line string is shown
-	// in the right-hand split pane. Empty return = render a default
-	// "no preview" placeholder.
-	//
-	// Like PreviewTemplate, this is a callback so the picker package
-	// stays free of project-specific dependencies (project.Registry,
-	// project.LoadRuntime, ghostty.WindowExists, etc. live in CLI).
-	//
-	// Prefer PreviewProjectFactory when live theme cycling (T) must be
-	// reflected in the preview — the factory re-creates the closure
-	// with the new theme on each cycle; PreviewProject captures the
-	// theme at construction time and cannot update it.
+	// PreviewProject is called on cursor movement; returns the right-pane content string.
+	// Prefer PreviewProjectFactory when live theme cycling must update the preview style.
 	PreviewProject func(name string) string
 
-	// PreviewProjectFactory, if set, supersedes PreviewProject. It is
-	// called once at startup with the initial theme to produce a
-	// PreviewProject closure, and again each time the user cycles the
-	// theme with T. This ensures the preview stays styled with the
-	// live theme after a cycle.
-	//
-	// The closure contract is the same as PreviewProject's: given a
-	// project name, return a styled multi-line string or "" for the
-	// default fallback.
+	// PreviewProjectFactory supersedes PreviewProject. Called once at startup and on each
+	// theme cycle to produce a PreviewProject closure styled with the new theme.
 	PreviewProjectFactory func(thm Theme) func(name string) string
 
-	// Action callbacks. nil = the corresponding key is disabled and
-	// hidden from the help footer (so `boo delete` selection-only
-	// pickers don't advertise actions they can't perform).
+	// Action callbacks. nil = key disabled and hidden from help.
 	//
-	// Successful callbacks return nil error; the picker then calls
-	// RefreshItems and re-renders the list. Failed callbacks return an
-	// error which the picker shows on a transient error screen until
-	// the user dismisses it with any key.
-	//
-	// OnDelete returns (warnings, error). A non-nil warnings slice means
-	// deletion succeeded but one or more non-fatal side effects (e.g.
-	// closing the Ghostty window, purging the state dir) failed; the
-	// picker incorporates the warnings into its status message. A non-nil
-	// error means deletion itself failed; the picker shows an error screen.
-	//
-	// Confirmation/UX flow lives in the picker. The CLI side just
-	// performs the side effect — it does NOT prompt or print, because
-	// we're still inside the alt-screen and the picker owns the
-	// presentation.
+	// OnDelete returns (warnings, error). Non-nil warnings = success with non-fatal
+	// side-effect failures; non-nil error = deletion itself failed (shows error screen).
+	// Confirmation/UX lives in the picker; CLI only performs the side effect.
 	OnDelete    func(name string, purge bool) (warnings []string, err error)
 	OnSetLayout func(name, template string) error
-	// OnEdit applies a pending edit. Receives the original project key
-	// (oldName) plus the user's desired post-edit values. The CLI
-	// decides whether each field actually changed and what side effects
-	// (rename state dir, re-resolve template, etc.) are needed; nil
-	// callback = the 'e' key is disabled and dropped from help.
+	// OnEdit applies an edit. Receives original key (oldName) plus desired post-edit values.
+	// nil = 'e' key disabled.
 	OnEdit func(oldName, newName, newDir, newTemplate string) error
 
-	// OnOpenLayout returns a tea.Cmd that opens the highlighted
-	// project's layout file in $EDITOR. The CLI is expected to wrap
-	// tea.ExecProcess so the alt-screen suspends, the editor runs in
-	// the user's controlling terminal, and the picker resumes when the
-	// editor exits. Returning nil from the callback (or leaving the
-	// field nil) disables the 'o' key and drops it from help.
-	//
-	// We give the picker a tea.Cmd rather than running the editor
-	// here so the picker package stays free of $EDITOR / exec.Command
-	// knowledge — same separation as PreviewProject etc.
+	// OnOpenLayout returns a tea.Cmd that opens the layout file in $EDITOR via
+	// tea.ExecProcess. Returning nil disables the 'o' key. Callback keeps the picker
+	// free of $EDITOR / exec.Command knowledge.
 	OnOpenLayout func(name string) tea.Cmd
 
-	// RefreshItems is called after a successful action callback. It
-	// returns the new list of items the picker should display, or an
-	// error if the refresh itself fails. On error the picker logs via
-	// slog and leaves the existing list in place — the user can still
-	// navigate; the next action will re-load the registry under the
-	// lock anyway. On success with a nil or empty slice, the picker
-	// transitions to the empty-state view. nil callback = the picker
-	// leaves the existing list in place (stale data until exit).
+	// RefreshItems is called after a successful action. Returns the new item list or an
+	// error; on error the picker logs and leaves the existing list in place. nil = no refresh.
 	RefreshItems func() ([]Item, error)
 
-	// OnLaunch, if set, is invoked when the user selects a project to
-	// launch. The returned tea.Cmd runs asynchronously while the picker
-	// stays alive; on completion the Cmd must emit a LaunchFinishedMsg
-	// so the picker can update the status bar and re-enrich the list.
-	//
-	// When OnLaunch is nil the picker falls back to legacy behaviour:
-	// emit tea.Quit and return a SwitchIntent via Result. Selection-only
-	// callers (delete picker, save/new form flows) leave this nil.
+	// OnLaunch, if set, runs the project launch as an async tea.Cmd while the picker stays
+	// alive. Must emit LaunchFinishedMsg on completion. nil = legacy quit-and-handoff.
 	OnLaunch func(name string) tea.Cmd
 
-	// StartupWarning, if non-empty, is shown in the status bar when
-	// the picker first opens. Used to surface non-fatal startup issues
-	// such as a configured theme failing to load. The warning persists
-	// until the user takes any action that replaces the status.
+	// StartupWarning, if non-empty, is shown in the status bar on open.
 	StartupWarning string
 }
 
@@ -487,120 +388,64 @@ type statusLine struct {
 	isErr bool   // true => render in StatusBarError style
 }
 
-// splitThreshold is the minimum total terminal width below which we
-// collapse the list+detail split-pane back to single-pane (just the list).
-// At 90 cols the list pane gets ~45 inner cols (after rightPaneWidth=40 +
-// 1-col gutter + 4 cols of list-pane border/padding) — enough for project
-// name + status pill + last-launched without horizontal cramping, and the
-// 40-col right pane has comfortable room for metadata + a 36-col layout
-// preview. Was 70 (and 80 before that): at 70 the math fit but produced
-// an exact-fit layout in real Ghostty panes (~83 cols) where any content
-// drift overflowed visibly into the adjacent pane. 90 keeps the
-// problem range (~70-89 cols) in single-pane mode where overflow is
-// harmless.
+// splitThreshold is the minimum terminal width for the split-pane layout.
+// Below 90 cols the list pane gets cramped; 90 keeps the squeeze range in
+// single-pane mode where overflow is harmless. (Was 80, then 70, raised to 90.)
 const splitThreshold = 90
 
-// splitMinHeight is the minimum terminal height below which split mode
-// is suppressed regardless of width. The right-pane content (project
-// title + 4 metadata rows + "layout preview" header + tab title + an
-// 8-row layout preview ASCII = ~17 rows minimum, more if the dir path
-// wraps) clips ugly when the inner height is below ~20. Below this
-// threshold we drop the right pane and use the full width for the list,
-// where vertical space is more useful anyway.
+// splitMinHeight is the minimum terminal height for split mode. Below 24 rows the
+// right-pane content clips ugly; drop to single-pane where vertical space helps more.
 const splitMinHeight = 24
 
-// rightPaneWidth is the width budget given to the right pane when split is
-// active. Leaving the rest for the list keeps long project names readable.
-// 40 chosen as a happy medium between "enough to render a layout preview"
-// (~25 cols) and "doesn't squeeze the list" (the list needs ~30+ for
-// status pills).
+// rightPaneWidth is the column budget for the right pane in split mode.
+// 40 balances "enough for a layout preview" (~25 cols) vs "not squeezing the list".
 const rightPaneWidth = 40
 
-// Layout overheads used by the WindowSize math. Split out as named
-// constants so the relationship between bordered panes and the status
-// bar is auditable in one place rather than scattered as +1/+2/+4.
+// Layout overheads used by WindowSize math.
 const (
-	// statusBarHeight is the number of vertical lines reserved at the
-	// bottom of the screen for the status bar.
-	statusBarHeight = 1
-	// listBorderOverhead is the vertical lines consumed by the list
-	// pane's top + bottom border.
-	listBorderOverhead = 2
-	// listPaneInnerInset is the horizontal cols consumed by the list
-	// pane's left/right borders (2) + Padding(0,1) (2 = one col on
-	// each side). lipgloss's bordered styles report Width as the
-	// *content* width, so we subtract this from the available width
-	// before calling list.SetSize.
-	listPaneInnerInset = 4
-	// listMinInnerWidth is the floor for the list's inner content
-	// width. Going below this leaves a useless sliver of a list (no
-	// title visible). Mirrors the previous hardcoded "20" floor.
-	listMinInnerWidth = 20
-	// brandStripReserved is the vertical lines reserved at the top of
-	// the list pane for the brand strip (3 rows of art) plus a 1-row
-	// gap separating it from the bubbles list title. We only render
-	// the strip when the list pane is tall enough to spare 4 rows
-	// AND wide enough for the 10-col art (see viewList).
-	brandStripReserved = 4
-	// brandStripMinHeight is the inner-list-pane height below which
-	// we drop the strip rather than starve the items area. Picked so
-	// at least ~6 rows remain for items + the bubbles title + help.
-	brandStripMinHeight = 12
+	statusBarHeight    = 1  // vertical lines reserved for the bottom status bar
+	listBorderOverhead = 2  // top + bottom border of the list pane
+	listPaneInnerInset = 4  // list pane: left/right borders (2) + Padding(0,1) (2)
+	listMinInnerWidth  = 20 // floor for list inner content width
+	brandStripReserved = 4  // rows for the brand strip (3) + gap (1) above the list
+	brandStripMinHeight = 12 // inner list-pane height below which we suppress the strip
 )
 
-// editorFinishedMsg is dispatched by the CLI's OnOpenLayout callback
-// after tea.ExecProcess returns. err is whatever the spawned editor
-// returned (nil = success). Picker handles this in Update by refreshing
-// the items list (the user may have rewritten the layout file) and
-// surfacing any error via screenError.
-//
-// Public so CLI-side code that constructs the tea.Cmd can dispatch the
-// right message; callers should treat it as opaque otherwise.
+// editorFinishedMsg is dispatched by OnOpenLayout after tea.ExecProcess returns.
+// Public alias so CLI-side code can dispatch the right message without the unexported name.
 type EditorFinishedMsg = editorFinishedMsg
 
 type editorFinishedMsg struct {
 	err error
 }
 
-// NewEditorFinishedMsg constructs an editorFinishedMsg. CLI-side code
-// that wraps tea.ExecProcess uses this so it doesn't need to depend on
-// the unexported type name.
+// NewEditorFinishedMsg constructs an editorFinishedMsg for CLI-side tea.ExecProcess wrappers.
 func NewEditorFinishedMsg(err error) tea.Msg {
 	return editorFinishedMsg{err: err}
 }
 
-// launchFinishedMsg is dispatched by the tea.Cmd returned from an
-// OnLaunch callback when the launch attempt completes (success or
-// failure). The picker handles it in Update by updating the status bar
-// and triggering a re-enrichment so the newly-launched project's status
-// pill refreshes.
+// launchFinishedMsg is dispatched when an OnLaunch cmd completes.
 type launchFinishedMsg struct {
 	name string
 	err  error
 }
 
-// LaunchFinishedMsg is the exported type alias for launchFinishedMsg.
-// CLI-side OnLaunch callbacks use NewLaunchFinishedMsg to return the
-// right message type without depending on the unexported name.
+// LaunchFinishedMsg is the exported alias for CLI-side OnLaunch callbacks.
 type LaunchFinishedMsg = launchFinishedMsg
 
-// NewLaunchFinishedMsg constructs a launchFinishedMsg for the named
-// project. Pass nil err on success, non-nil on failure.
+// NewLaunchFinishedMsg constructs a launchFinishedMsg. Pass nil err on success.
 func NewLaunchFinishedMsg(name string, err error) tea.Msg {
 	return launchFinishedMsg{name: name, err: err}
 }
 
-// brandStripActive reports whether the list pane is large enough to
-// host the brand strip header. The strip is decorative; it must yield
-// when space is tight rather than steal rows from the items list.
+// brandStripActive reports whether the list pane is tall enough for the decorative strip.
 func (m *model) brandStripActive(innerListHeight int) bool {
 	return innerListHeight >= brandStripMinHeight
 }
 
-// usableInnerHeight returns the per-pane content height (rows inside
-// the bordered box, excluding borders and the status bar). The -1
-// safety margin matches the one in Update's listHeight calc — see the
-// comment there for why both sites must agree.
+// usableInnerHeight returns the per-pane content height (rows inside bordered box,
+// excluding borders and status bar). The -1 safety margin guards against terminals
+// that report height inclusive of chrome they reserve outside the alt-screen.
 func (m *model) usableInnerHeight() int {
 	h := m.height - statusBarHeight - listBorderOverhead - 1
 	if h < 1 {
@@ -640,14 +485,9 @@ type enrichedItemsMsg struct {
 	gen   uint64
 }
 
-// startEnrich returns a tea.Cmd that calls the RefreshItems callback
-// asynchronously and sends an enrichedItemsMsg when it completes.
-// Returns nil when no RefreshItems callback is configured (e.g. in the
-// selection-only delete picker), which is a safe no-op for tea.Batch.
-//
-// Each call increments m.enrichGen. The captured gen is embedded in the
-// resulting enrichedItemsMsg so the Update handler can discard results
-// from older in-flight calls (staleness protection).
+// startEnrich returns a tea.Cmd that calls RefreshItems asynchronously and sends
+// an enrichedItemsMsg. Increments enrichGen so stale in-flight results are discarded.
+// Returns nil when RefreshItems is nil (safe no-op for tea.Batch).
 func (m *model) startEnrich() tea.Cmd {
 	if m.refreshItems == nil {
 		return nil
@@ -661,15 +501,9 @@ func (m *model) startEnrich() tea.Cmd {
 	}
 }
 
-// startPreview returns a tea.Cmd that invokes the PreviewProject callback
-// asynchronously for the currently-selected item and sends a
-// previewReadyMsg when it completes. Returns nil when no callback is
-// configured or when the selected item is not an Item (e.g. newProjectItem
-// or empty list).
-//
-// Each call increments m.previewGen. The captured gen is embedded in the
-// resulting previewReadyMsg so stale results from rapid cursor movement
-// are silently discarded in Update.
+// startPreview returns a tea.Cmd that invokes PreviewProject asynchronously for the
+// selected item and sends a previewReadyMsg. Increments previewGen so stale results
+// from rapid cursor movement are discarded. Returns nil when no callback is configured.
 func (m *model) startPreview() tea.Cmd {
 	if m.previewProject == nil {
 		return nil
@@ -691,18 +525,10 @@ func (m *model) startPreview() tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if sz, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width, m.height = sz.Width, sz.Height
-		// Reserve 1 line for the status bar at the bottom and 2 lines
-		// for the list-pane border (top + bottom edges). The extra
-		// 1-line safety margin guards against terminals that report
-		// height inclusive of chrome they reserve outside Bubble Tea's
-		// alt-screen (e.g. iTerm tab bars, Ghostty's title bar in some
-		// configs). Without it, the bottom row of either pane can be
-		// scrolled off-screen.
+		// Reserve 1 line for the status bar, 2 for list-pane border, and 1 safety margin
+		// for terminals that report height inclusive of chrome outside the alt-screen.
 		listHeight := m.usableInnerHeight()
-		// Width: in split mode, the right pane + gutter take
-		// rightPaneWidth+1 cols. In non-split mode, the list spans the
-		// whole width. Either way the list's own border + padding
-		// (listPaneInnerInset) eats 4 more cols from the inner area.
+		// In split mode the right pane + gutter take rightPaneWidth+1 cols.
 		listWidth := sz.Width
 		if m.splitActive() {
 			listWidth = sz.Width - rightPaneWidth - 1
@@ -721,14 +547,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// editorFinishedMsg arrives after tea.ExecProcess returns — the
-	// alt-screen has already been restored by the runtime. We just
-	// need to pull fresh data (the user may have rewritten the layout
-	// file) and surface any spawn error. Handled here at the top of
-	// Update so a late-arriving message can't be swallowed by a
-	// sub-screen dispatch (e.g. if the user opened the form between
-	// pressing 'o' and the editor exiting — shouldn't happen, but
-	// dispatching from here is robust either way).
+	// editorFinishedMsg: alt-screen already restored by the runtime; refresh data
+	// and surface any spawn error. Handled here (not per-screen) for robustness.
 	if fin, ok := msg.(editorFinishedMsg); ok {
 		if fin.err != nil {
 			return m.showError(fmt.Sprintf("editor: %v", fin.err)), nil
@@ -737,10 +557,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startEnrich()
 	}
 
-	// previewReadyMsg is sent by startPreview when the async preview
-	// computation completes. Store the result in the cache. Discard
-	// stale results (gen < m.previewGen) that were overtaken by a newer
-	// cursor movement or theme cycle.
+	// previewReadyMsg: cache result; discard if gen is stale (overtaken by newer cursor move).
 	if msg, ok := msg.(previewReadyMsg); ok {
 		if msg.gen >= m.previewGen {
 			if m.previewCache == nil {
@@ -751,15 +568,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// enrichedItemsMsg is sent by startEnrich (fired from Init on startup
-	// and from runIntent after mutating actions). Discard stale results
-	// (gen < m.enrichGen) that were overtaken by a newer enrichment — this
-	// prevents a slow startup enrichment from overwriting a post-delete
-	// refresh that already ran. Apply the new item list on success.
+	// enrichedItemsMsg: discard stale results (gen < enrichGen); apply new items on success.
 	if msg, ok := msg.(enrichedItemsMsg); ok {
 		if msg.gen < m.enrichGen {
-			// Stale: a newer enrichment has been started after this
-			// one was dispatched. Discard unconditionally.
+			// Stale: a newer enrichment supersedes this one.
 			return m, nil
 		}
 		if msg.err != nil {
@@ -774,17 +586,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			listItems = append(listItems, newProjectItem{})
 		}
 		m.list.SetItems(listItems)
-		// Invalidate the preview cache: enrichment updates Status and
-		// Trailing which projectPreviewer reflects in the right pane.
-		// Dispatch a fresh preview so the right pane catches up.
+		// Invalidate preview cache: enrichment updates Status/Trailing that projectPreviewer reflects.
 		m.previewCache = nil
 		return m, m.startPreview()
 	}
 
-	// launchFinishedMsg is dispatched by the tea.Cmd returned from an
-	// OnLaunch callback. Update the status bar and trigger a fresh
-	// enrichment so the newly-launched project's status pill reflects
-	// its running state.
+	// launchFinishedMsg: update status bar and re-enrich so the status pill reflects running state.
 	if lm, ok := msg.(launchFinishedMsg); ok {
 		if lm.err != nil {
 			m.setStatusErr(fmt.Sprintf("launch failed: %v", lm.err))
@@ -842,11 +649,7 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if cmd == nil {
 						break
 					}
-					// tea.ExecProcess (which the CLI wraps around the
-					// editor) suspends the alt-screen for the duration
-					// of the editor and resumes it afterwards. The
-					// CLI's callback wraps the editor's exit in an
-					// editorFinishedMsg so we can refresh items below.
+					// tea.ExecProcess suspends the alt-screen for the editor and resumes it after.
 					return m, cmd
 				}
 			case matches(m.keys.Delete, pressed):
@@ -880,11 +683,7 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch v := m.list.SelectedItem().(type) {
 			case Item:
 				if m.onLaunch != nil {
-					// Stay-alive launch path: the picker remains open
-					// while the project window opens or switches focus.
-					// Status updates keep the user informed; a fresh
-					// enrichment fires on completion so the status pill
-					// reflects the new running state.
+					// Stay-alive launch: picker remains open while the project window opens.
 					m.status = statusLine{text: fmt.Sprintf("launching %s…", v.Key)}
 					return m, m.onLaunch(v.Key)
 				}
@@ -901,8 +700,7 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	// Track the selected item before delegating to the list model so
-	// we can detect cursor movement and dispatch a fresh preview.
+	// Track selection before delegating to detect cursor movement and dispatch a fresh preview.
 	prevKey := ""
 	if it, ok := m.list.SelectedItem().(Item); ok {
 		prevKey = it.Key
@@ -920,23 +718,16 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// openEditForm switches to the form sub-screen pre-populated with the
-// highlighted project's current values and flipped into edit mode. The
-// form's existing inputs are mutated in place (rather than constructing
-// a fresh formModel) so the cycler index, layout names, and preview
-// callback all stay wired up.
-//
-// Item.Description carries the project's directory (set by the CLI's
-// item-builder), and Item.Layout carries the template name. Both can
-// be edited freely — the CLI decides which changes are meaningful.
+// openEditForm switches to the form pre-populated with the project's current values
+// in edit mode. Mutates inputs in place so the cycler index, layout names, and preview
+// callback stay wired up.
 func (m *model) openEditForm(it Item) {
 	m.form.inputs[fieldName].SetValue(it.Key)
 	m.form.inputs[fieldDir].SetValue(it.Description)
 	m.form.inputs[fieldFrom].SetValue("") // hidden in edit mode but reset for cleanliness
 	if it.Layout != "" {
 		m.form.inputs[fieldTemplate].SetValue(it.Layout)
-		// Re-anchor the cycler at the project's current template so
-		// ←/→ moves relative to "what it is now".
+		// Re-anchor the cycler at the project's current template so ←/→ cycles from "what it is now".
 		for i, n := range m.form.layoutNames {
 			if n == it.Layout {
 				m.form.layoutIdx = i
@@ -954,9 +745,7 @@ func (m *model) openEditForm(it Item) {
 	m.screen = screenForm
 }
 
-// openDeleteConfirm transitions to the confirm modal pre-loaded with a
-// DeleteIntent for the given item. Pulled out so the d/D handlers stay
-// readable and to give tests a stable hook.
+// openDeleteConfirm transitions to the confirm modal for the given item.
 func (m *model) openDeleteConfirm(it Item, purge bool) {
 	title := "Delete project?"
 	if purge {
@@ -970,13 +759,8 @@ func (m *model) openDeleteConfirm(it Item, purge bool) {
 	m.screen = screenConfirm
 }
 
-// openSetLayout transitions to the set-layout sub-screen for the given
-// project, anchoring the cycler at the project's current template.
-//
-// Returns false (and does NOT switch screen) when no template names are
-// available — pressing 'l' in a picker that wasn't given LayoutNames
-// (e.g. selection-only mode for `boo delete`) is a no-op rather than a
-// confusing empty cycler.
+// openSetLayout transitions to the set-layout sub-screen for the given project.
+// Returns false (no screen switch) when no template names are available.
 func (m *model) openSetLayout(it Item) bool {
 	if len(m.layoutNames) == 0 {
 		return false
@@ -986,26 +770,19 @@ func (m *model) openSetLayout(it Item) bool {
 	return true
 }
 
-// updateConfirm handles y/n on the active confirm modal.
-//
-// On confirm: copy modal.pending into mm.intent and quit. On cancel:
-// drop back to the list (modal pending is discarded). The CLI then
-// type-switches on the intent.
+// updateConfirm handles y/n on the active confirm modal. Confirm dispatches
+// the pending intent through runIntent; cancel drops back to the list.
 func (m *model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok {
 		pressed := km.String()
 		switch {
 		case matches(m.keys.ConfirmYes, pressed):
 			if m.confirm.pending == nil {
-				// Defensive: should be impossible if openDeleteConfirm
-				// is the only entry point, but rather than panic we
-				// just drop back to the list.
+				// Defensive: should be impossible if openDeleteConfirm is the only entry point.
 				m.screen = screenList
 				return m, nil
 			}
-			// Dispatch the pending intent through the in-TUI action
-			// runner. Successful actions return us to the list with
-			// fresh data; failed ones land on screenError.
+			// Dispatch the pending intent through the in-TUI action runner.
 			pending := m.confirm.pending
 			m.confirm = confirmModel{}
 			return m.runIntent(pending)
@@ -1018,26 +795,18 @@ func (m *model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// runIntent executes a mutating intent in-process via the configured
-// action callbacks, then refreshes the list. SwitchIntent and
-// NewProjectIntent are handed back to the caller (they exit the TUI
-// because they hand off to Ghostty); everything else is handled here.
-//
-// On callback error we transition to screenError so the user can read
-// the message before it disappears. Old-style "set m.intent + tea.Quit"
-// is reserved for intents that genuinely need the CLI to take over the
-// terminal.
+// runIntent executes a mutating intent via configured action callbacks, then refreshes
+// the list. SwitchIntent and NewProjectIntent exit the TUI (CLI takes over the terminal);
+// all others run in-process and return to the list.
 func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 	switch v := in.(type) {
 	case SwitchIntent, NewProjectIntent:
-		// Quit-and-handoff intents — CLI executes after Run returns.
+		// Quit-and-handoff: CLI executes after Run returns.
 		m.intent = in
 		return m, tea.Quit
 	case DeleteIntent:
 		if m.onDelete == nil {
-			// No callback wired — shouldn't be reachable because the
-			// d/D keys are gated on onDelete being set, but keep the
-			// system honest.
+			// No callback — shouldn't be reachable (d/D gated on onDelete being set).
 			m.screen = screenList
 			return m, nil
 		}
@@ -1047,10 +816,7 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 		}
 		switch {
 		case len(warns) > 1:
-			// Multiple non-fatal side-effect failures: log all of them
-			// and inline the first warning plus a count so TUI users see
-			// at least one concrete message (slog output isn't visible
-			// inside the alt-screen).
+			// Multiple side-effect failures: log all, show first + count in TUI.
 			for _, w := range warns {
 				slog.Warn("picker: delete warning", "project", v.Name, "warning", w)
 			}
@@ -1074,8 +840,7 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 			return m.showError(fmt.Sprintf("set layout for %q to %q: %v", v.Name, v.Template, err)), nil
 		}
 		m.setStatusOK(fmt.Sprintf("set layout for %s to %s", v.Name, v.Template))
-		// Invalidate the cached preview for this project — the layout
-		// template changed and the preview would otherwise show stale data.
+		// Invalidate cached preview: layout template changed, preview would show stale data.
 		delete(m.previewCache, v.Name)
 		m.screen = screenList
 		return m, m.startEnrich()
@@ -1094,32 +859,22 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatusOK(fmt.Sprintf("edited %s", v.NewName))
 		}
-		// Invalidate cached previews for both old and new name (the
-		// name, dir, or template may have changed).
+		// Invalidate cached previews for both names (name, dir, or template may have changed).
 		delete(m.previewCache, v.OldName)
 		delete(m.previewCache, v.NewName)
-		// Drop the form back to new-project mode so the next 'n' press
-		// doesn't surprise the user with leftover edit state.
+		// Reset form to new-project mode so the next 'n' doesn't show leftover edit state.
 		m.form.setEditMode(false, "")
 		m.screen = screenList
 		return m, m.startEnrich()
 	default:
-		// Unknown intent — defensive; should be impossible because the
-		// sealed interface forbids external implementations.
+		// Unknown intent — sealed interface forbids external implementations; defensive only.
 		m.screen = screenList
 		return m, nil
 	}
 }
 
-// refreshList rebuilds the bubbles/list contents from the caller's
-// RefreshItems callback. No-op when the callback wasn't supplied (the
-// list will show stale data until the user exits — caller's choice).
-//
-// On error the existing list is left in place: the user can still
-// navigate and the next action will re-load the registry under the
-// lock anyway. On success with a nil or empty slice the picker shows
-// the empty-state view — this is distinct from an error and is the
-// correct result when all projects have been deleted.
+// refreshList rebuilds the list from the RefreshItems callback. On error, keeps
+// existing items. On success with nil/empty slice, transitions to empty-state view.
 func (m *model) refreshList() {
 	if m.refreshItems == nil {
 		return
@@ -1139,48 +894,28 @@ func (m *model) refreshList() {
 	m.list.SetItems(listItems)
 }
 
-// showError transitions to screenError pre-loaded with msg. Returns the
-// receiver so callers can `return m.showError(...), nil` in a single line.
+// showError transitions to screenError and mirrors the failure into the status bar
+// so it persists after the user dismisses the error screen.
 func (m *model) showError(msg string) *model {
 	m.errMsg = msg
 	m.screen = screenError
-	// Mirror the failure into the status bar so it persists after the
-	// user dismisses the error screen — they shouldn't have to remember
-	// what just failed.
 	m.setStatusErr(msg)
 	return m
 }
 
 // setStatusOK records a successful action's outcome for the status bar.
-// Called from runIntent after a callback returns nil.
 func (m *model) setStatusOK(msg string) {
 	m.status = statusLine{text: msg, isErr: false}
 }
 
 // setStatusErr records a failed action's outcome for the status bar.
-// Wraps showError's message in red.
 func (m *model) setStatusErr(msg string) {
 	m.status = statusLine{text: msg, isErr: true}
 }
 
-// cycleTheme advances to the next available theme (built-in + user)
-// in alphabetical order and applies it live to every visible surface
-// (list delegate, list title, form). When configPath is set the new
-// theme name is written back to disk immediately — comments and other
-// keys in the config file are preserved. On persist failure the
-// in-memory switch still takes effect and the status bar surfaces the
-// write error so the user is informed.
-//
-// Failures in theme loading fall into the status bar; the cycle still
-// advances so the user can keep trying.
-//
-// No-ops gracefully when theme.List returns nothing (impossible in
-// production — the built-in default is always present — but guarded
-// so a packaging bug doesn't crash the TUI).
-//
-// Returns a tea.Cmd that re-dispatches the preview for the selected
-// item with the new theme (only meaningful when a PreviewProjectFactory
-// is configured — applyTheme handles the cache invalidation).
+// cycleTheme advances to the next theme alphabetically, applies it live, and persists
+// it to disk when configPath is set. On load failure the cycle still advances.
+// On persist failure the in-memory switch takes effect and the status bar surfaces the error.
 func (m *model) cycleTheme() tea.Cmd {
 	names, err := theme.List(m.themesDir)
 	if err != nil || len(names) == 0 {
@@ -1188,9 +923,7 @@ func (m *model) cycleTheme() tea.Cmd {
 		return nil
 	}
 
-	// Find current position; default to -1 so an unknown current
-	// name (theme deleted from disk between launches) advances to
-	// names[0] rather than wrapping past the end.
+	// Default to -1 so an unknown current name advances to names[0] rather than wrapping past the end.
 	idx := -1
 	for i, n := range names {
 		if n == m.themeName {
@@ -1202,8 +935,7 @@ func (m *model) cycleTheme() tea.Cmd {
 
 	t, ok := ThemeByName(m.themesDir, next)
 	if !ok {
-		// theme.List returned a name that ThemeByName couldn't load.
-		// Skip it and report — the user can keep cycling past it.
+		// theme.List returned a name ThemeByName couldn't load — skip and report.
 		m.setStatusErr(fmt.Sprintf("theme %q failed to load", next))
 		return nil
 	}
@@ -1223,40 +955,25 @@ func (m *model) cycleTheme() tea.Cmd {
 	return previewCmd
 }
 
-// applyTheme swaps the live theme on every surface that caches
-// lipgloss styles. Centralised here so future theme-mutating paths
-// (e.g. a `boo themes pick` modal) reuse the same propagation rules
-// and don't leave half the UI rendering in the old palette.
-//
-// When a PreviewProjectFactory is configured, applyTheme re-creates
-// the previewProject closure with the new theme so subsequent async
-// preview dispatches render with the correct palette. The preview cache
-// is also cleared so stale themed previews are not shown.
+// applyTheme swaps the live theme on every surface that caches lipgloss styles.
+// When PreviewProjectFactory is configured, re-creates the previewProject closure
+// with the new theme and clears the preview cache.
 func (m *model) applyTheme(name string, t Theme) {
 	m.theme = t
 	m.themeName = name
-
-	// Rebuild the list delegate so row styles (selected title, dim
-	// description, etc.) pick up the new palette.
+	// Rebuild list delegate so row styles pick up the new palette.
 	m.list.SetDelegate(newDelegate(t))
 	m.list.Styles.Title = t.ListTitle
-
-	// The form caches its own theme — propagate.
 	m.form.theme = t
-
-	// Re-create the preview closure with the new theme so the right
-	// pane stays colour-consistent with the rest of the UI. Clear the
-	// cache so stale themed strings are not shown while the fresh
-	// preview loads.
+	// Re-create preview closure and clear cache so stale styled strings are not shown.
 	if m.previewProjectFactory != nil {
 		m.previewProject = m.previewProjectFactory(t)
 		m.previewCache = nil
 	}
 }
 
-// updateError dismisses the error screen on any keypress and returns to
-// the list. We deliberately accept any key (not just esc/enter) so a
-// reflexive keypress doesn't accidentally trigger another action.
+// updateError dismisses the error screen on any keypress (deliberate — any key prevents
+// a reflexive keystroke from accidentally triggering another action).
 func (m *model) updateError(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.KeyMsg); ok {
 		m.errMsg = ""
@@ -1265,8 +982,7 @@ func (m *model) updateError(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// viewError renders the error screen — title + message + "any key" hint.
-// Wrapped in a rounded border like the other modals.
+// viewError renders the error modal.
 func (m *model) viewError() string {
 	body := m.theme.RightPaneTitle.Render("Error") + "\n\n" +
 		m.errMsg + "\n\n" +
@@ -1293,10 +1009,7 @@ func (m *model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if submitted {
-		// Dispatch through runIntent so edit-style intents (EditIntent)
-		// run in-loop and refresh the list, while quit-and-handoff
-		// intents (NewProjectIntent) still exit the TUI for the CLI to
-		// take over the terminal.
+		// Dispatch through runIntent: edit intents run in-loop; NewProjectIntent exits the TUI.
 		return m.runIntent(intent)
 	}
 	return m, cmd
@@ -1313,10 +1026,7 @@ func (m *model) updateAlreadyRegistered(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenForm
 			return m, nil
 		case matches(m.keys.Quit, pressed), matches(m.keys.Cancel, pressed):
-			// Quit (q / ctrl+c) and Cancel (esc) both dismiss this
-			// sub-screen. Cancel was previously handled via Quit when esc
-			// was bound there; now that esc is removed from Quit we check
-			// Cancel explicitly so sub-screen dismissal keeps working.
+			// Both Quit (q/ctrl+c) and Cancel (esc) dismiss this screen.
 			m.cancelled = true
 			return m, tea.Quit
 		}
@@ -1340,13 +1050,8 @@ func (m *model) View() string {
 	default:
 		raw = m.viewList()
 	}
-	// Hard cap to the terminal viewport. clipToHeight + per-pane sizing
-	// give the right answer in the common case, but lipgloss's
-	// auto-wrap can sneak extra rows into bordered content (e.g. a
-	// preview line that visually equals the inner width but lipgloss
-	// wraps anyway because of padding accounting). MaxHeight here is
-	// the last line of defence — without it, alt-screen scrolls the
-	// top off. MaxWidth covers the symmetric horizontal case.
+	// Hard cap to the terminal viewport. lipgloss auto-wrap can add rows into bordered
+	// content beyond per-pane sizing; MaxHeight/MaxWidth are the last line of defence.
 	if m.width > 0 && m.height > 0 {
 		return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(raw)
 	}
@@ -1374,16 +1079,10 @@ func (m *model) viewList() string {
 	innerHeight := m.usableInnerHeight()
 	listView := m.list.View()
 	if m.brandStripActive(innerHeight) {
-		// Strip + 1-row gap + list. The "\n" between strip and the
-		// list's first line provides the visual separator; the
-		// strip itself is 3 rows so this yields 3+1=4 rows above
-		// the list, matching brandStripReserved.
+		// 3-row strip + 1-row gap = brandStripReserved rows above the list.
 		listView = m.theme.RightPaneFaint.Render(brandStrip) + "\n\n" + listView
 	}
-	// lipgloss .Width(N) treats N as "frame minus border" — padding
-	// is subtracted from N to get the content area. innerListWidth is
-	// the content width we want (and what we passed to list.SetSize),
-	// so add back the 2 cols of horizontal padding here.
+	// lipgloss Width(N): N is frame-minus-border; add back padding cols for content area match.
 	listBoxed := m.theme.ListPaneBorder.
 		Width(innerListWidth + listPanePaddingCols).
 		Height(innerHeight).
@@ -1398,12 +1097,8 @@ func (m *model) viewList() string {
 	return panes + "\n" + m.viewStatusBar()
 }
 
-// viewStatusBar renders the bottom status line. Shows the most recent
-// action's outcome (success in green, failure in red) or a faint idle
-// hint when nothing has happened yet. The output is hard-truncated to
-// m.width so a long error message can never wrap onto a second line —
-// a wrap would steal a row from the panes above and invalidate the
-// statusBarHeight=1 layout math.
+// viewStatusBar renders the bottom status line. Hard-truncated to m.width so a long
+// error message can never wrap and steal a row from the panes (statusBarHeight=1).
 func (m *model) viewStatusBar() string {
 	const idleHint = "press ? for help"
 	var raw, prefix string
@@ -1423,12 +1118,8 @@ func (m *model) viewStatusBar() string {
 	return style.Render(truncateToWidth(prefix+raw, m.width))
 }
 
-// truncateToWidth returns s clipped to at most width visible runes.
-// width<=0 returns s unchanged (the WindowSizeMsg hasn't been received
-// yet — the caller has bigger problems than wrapping). We use rune
-// count rather than a wcwidth-aware measure because the strings we
-// truncate are short status messages without wide glyphs; if that
-// changes, swap in lipgloss.Width / runewidth.
+// truncateToWidth clips s to at most width visible runes, replacing the last with "…".
+// Returns s unchanged when width<=0 (WindowSizeMsg not yet received).
 func truncateToWidth(s string, width int) string {
 	if width <= 0 {
 		return s
@@ -1440,32 +1131,15 @@ func truncateToWidth(s string, width int) string {
 	if width <= 1 {
 		return string(runes[:width])
 	}
-	// Replace the last visible rune with an ellipsis to signal
-	// truncation rather than silently chopping.
+	// Replace the last rune with "…" to signal truncation.
 	return string(runes[:width-1]) + "…"
 }
 
-// viewRightPane renders the context-sensitive right-hand pane. Content
-// depends on what's currently highlighted in the list:
-//
-//   - An Item: project detail (delegates to opts.PreviewProject if wired,
-//     otherwise renders a minimal name/dir summary from the Item itself).
-//   - newProjectItem: a hint about the form keystroke.
-//   - Nothing selected (empty list): a placeholder.
-//
-// The pane is wrapped in a rounded border styled by the theme. Content
-// width is rightPaneWidth - 4 (border + padding). Content is also
-// hard-clipped to innerHeight via clipToHeight before being handed to
-// lipgloss — splitMinHeight is only a heuristic floor, and at exactly
-// 24 rows a layout preview with deep column splits could still overflow
-// without this cap.
+// viewRightPane renders the context-sensitive right pane. Content depends on the
+// selected item: Item → project detail; newProjectItem → hint; empty → placeholder.
+// Content is hard-clipped to innerHeight before being handed to lipgloss.
 func (m *model) viewRightPane() string {
-	// rightPaneWidth is the screen footprint (border 2 + padding 2 +
-	// content). lipgloss .Width(N) renders a box that is N + border
-	// wide, AND .Width consumes the padding — i.e. content area is
-	// N - horizontal padding. So pass rightPaneWidth - rightPaneBorderCols
-	// and the resulting content area = rightPaneWidth - rightPaneBorderCols
-	// - rightPanePaddingCols = rightPaneInnerWidth.
+	// rightPaneWidth - rightPaneBorderCols gives content+padding width for lipgloss Width().
 	innerHeight := m.usableInnerHeight()
 	// Right pane gets +borderCorrectionPx height to match the list pane's
 	// apparent rendered height at runtime. See geometry.go for why.
@@ -1475,10 +1149,7 @@ func (m *model) viewRightPane() string {
 	case Item:
 		return border.Render(clipToHeight(m.renderItemDetail(v, rightPaneInnerWidth), innerHeight))
 	case newProjectItem:
-		// If there are no real projects yet, lean into the empty
-		// state with the brand mascot. Once the user has at least
-		// one project, drop back to a plain prompt — the mascot
-		// would just be visual noise.
+		// Empty state: show brand mascot. Once the user has a project, drop to a plain prompt.
 		hasProjects := false
 		for _, it := range m.list.Items() {
 			if _, ok := it.(Item); ok {
@@ -1502,10 +1173,8 @@ func (m *model) viewRightPane() string {
 	}
 }
 
-// clipToHeight returns s truncated to at most height lines. If s has
-// more lines, the last surviving line is replaced with an ellipsis to
-// signal there's more content. Returning s unchanged when height<=0
-// keeps the function safe to call before the WindowSizeMsg arrives.
+// clipToHeight truncates s to at most height lines, replacing the last with "…".
+// Returns s unchanged when height<=0.
 func clipToHeight(s string, height int) string {
 	if height <= 0 {
 		return s
@@ -1523,22 +1192,18 @@ func clipToHeight(s string, height int) string {
 }
 
 // renderItemDetail builds the right-pane content for a project Item.
-// Reads from the async preview cache (populated by startPreview via
-// previewReadyMsg) so View() stays I/O-free. On a cache miss the item
-// has not yet been previewed — render a lightweight "loading…"
-// placeholder so the pane is never blank. Falls back to the Item's
-// own fields when no PreviewProject callback was wired (e.g.
-// selection-only callers like `boo delete`).
+// Reads from the async preview cache; renders "loading…" on a cache miss.
+// Falls back to Item fields when no PreviewProject callback is wired.
 func (m *model) renderItemDetail(it Item, _ int) string {
 	if m.previewProject != nil {
-		// Accessing a nil map is safe in Go — it returns ("", false).
+		// nil map read is safe in Go — returns ("", false).
 		if cached, hit := m.previewCache[it.Key]; hit {
 			if cached != "" {
 				return cached
 			}
 			// Callback returned empty: fall through to the Item fallback.
 		} else {
-			// Not yet in the cache: the async cmd is in-flight.
+			// Not yet in cache: async cmd is in-flight.
 			return m.theme.RightPaneFaint.Render("loading…")
 		}
 	}
@@ -1561,8 +1226,7 @@ func (m *model) viewAlreadyRegistered() string {
 	out := m.theme.AlreadyRegisteredTitle.Render(
 		"This directory is already registered")
 	out += "\n\nProject: " + m.theme.AlreadyRegisteredName.Render(m.alreadyRegisteredAs)
-	// Derive the footer text from the keymap so it can never drift
-	// from what updateAlreadyRegistered actually accepts.
+	// Derive the footer text from the keymap so it can't drift from updateAlreadyRegistered.
 	footer := fmt.Sprintf("[%s] %s   [%s] %s   [esc] cancel",
 		m.keys.Confirm.Help().Key, m.keys.Confirm.Help().Desc,
 		m.keys.Switch.Help().Key, m.keys.Switch.Help().Desc)
@@ -1576,11 +1240,7 @@ type itemDelegate struct {
 
 func newDelegate(t Theme) itemDelegate { return itemDelegate{theme: t} }
 
-// Height is 1: each project (and the synthetic "+ New project" row)
-// occupies a single line. The previous 2-line layout duplicated the
-// project's directory between the list and the right pane and forced
-// a wide splitThreshold to keep both panes visible. The right pane
-// already shows the directory and other metadata in detail.
+// Height is 1: one line per project. Right pane shows directory and metadata in detail.
 func (itemDelegate) Height() int                             { return 1 }
 func (itemDelegate) Spacing() int                            { return 0 }
 func (itemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
@@ -1612,8 +1272,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		cursor = brandCursor
 	}
 
-	// Single-line layout: cursor + title + status pill + optional
-	// trailing (last-launched). Path lives in the right pane only.
+	// Single-line layout: cursor + title + status pill + optional trailing (last-launched).
 	line := fmt.Sprintf("%s%s   %s", cursor, titleS.Render(it.Title), d.renderStatus(it.Status))
 	if it.Trailing != "" {
 		line += "   " + d.theme.Trailing.Render(it.Trailing)

@@ -6,18 +6,8 @@ import (
 	booth "github.com/erzz/boo/internal/theme"
 )
 
-// Theme is the resolved set of styles the picker uses to render itself.
-//
-// Until now styles were scattered as module-level `var (...)` blocks. This
-// type centralises them so we can:
-//
-//   - Swap themes at runtime (Options.Theme + ThemeByName).
-//   - Add new named themes without touching every render call site.
-//   - Test that a theme has all required fields populated.
-//
-// All fields are required — a zero-value Theme will render empty/invisible
-// text. Construct themes via the named constructors (defaultTheme, etc.)
-// rather than building one from scratch.
+// Theme is the resolved set of lipgloss styles the picker renders with.
+// All fields are required; construct via named constructors (defaultTheme, etc.).
 type Theme struct {
 	// List item styles
 	Title         lipgloss.Style
@@ -74,10 +64,8 @@ type Theme struct {
 	StatusBarFaint lipgloss.Style // idle / no-action-yet hint text
 }
 
-// buildTheme materialises the lipgloss styles for a palette. This is
-// the one place we map the data model (theme.Theme) to renderable
-// lipgloss styles. Adding a new colour slot to the palette means
-// adding one line here and one in defaultTheme YAML — nothing else.
+// buildTheme materialises lipgloss styles from a palette. The single mapping point from
+// internal/theme data model to renderable styles.
 func buildTheme(p booth.Theme) Theme {
 	accent := lipgloss.Color(p.Colors.Accent)
 	info := lipgloss.Color(p.Colors.Info)
@@ -146,22 +134,9 @@ func defaultTheme() Theme {
 	return buildTheme(booth.MustDefault())
 }
 
-// ThemeByName resolves a theme name to a styled Theme. Loading order:
-//
-//  1. User theme at themesDir/<name>.yaml (if themesDir != "").
-//  2. Built-in theme embedded in the binary.
-//  3. Built-in `default` theme as ultimate fallback.
-//
-// On any error (unknown name, malformed file, IO failure) it falls
-// back to the default theme silently and returns ok=false. Themes are
-// cosmetic, not functional — a typo in `ui.theme` shouldn't prevent
-// the picker from launching. Callers that care about the failure
-// (notably `boo doctor`) should resolve the theme themselves via the
-// `internal/theme` package and inspect the error.
-//
-// themesDir may be empty, which restricts resolution to built-ins.
-// This matches what tests want and avoids forcing every caller to
-// thread the path through.
+// ThemeByName resolves a theme by name (user file in themesDir, then built-in, then default).
+// On any error falls back to the default theme silently and returns ok=false.
+// Themes are cosmetic — a typo in ui.theme must not prevent the picker from launching.
 func ThemeByName(themesDir, name string) (Theme, bool) {
 	r, err := booth.Resolve(themesDir, name)
 	if err != nil {

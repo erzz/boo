@@ -27,25 +27,16 @@ const (
 	pickerFzf
 )
 
-// runPicker is the shared entry point for any code path that wants to ask
-// the user to pick a project. Used by:
-//
-//   - bare `boo` (with no project name)
-//   - `boo fzf`
-//
-// In TUI mode the picker also offers a "+ New project" entry that returns
-// a NewProject intent; we then feed that back through runCreateProject.
-//
-// Cancellation (Esc / Ctrl-C / no selection) is treated as a no-op, never
-// an error.
+// runPicker is the shared entry point for asking the user to pick a project.
+// TUI mode also offers a "+ New project" entry that feeds back through runCreateProject.
+// Cancellation (Esc / Ctrl-C / no selection) is a no-op, never an error.
 func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) error {
 	reg, err := project.Load(a.Paths)
 	if err != nil {
 		return err
 	}
 
-	// fzf is selection-only and doesn't host a "create new" form. If the
-	// registry is empty, tell the user and bail; otherwise hand off.
+	// fzf is selection-only; no "create new" form.
 	if mode == pickerFzf {
 		if len(reg.Projects) == 0 {
 			_, _ = fmt.Fprintln(out, "No projects registered. Run 'boo new' to create one.")
@@ -66,11 +57,8 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		return switchToProject(ctx, a, p)
 	}
 
-	// TUI path. Always show the picker — even with zero projects, the
-	// "+ New project" entry is visible and that's the user's next move.
-	// Initial items are built from registry data only (no Ghostty calls,
-	// no filesystem stats). Async enrichment via picker.Init fires the
-	// RefreshItems callback in the background and fills in Status/Trailing.
+	// TUI path. Show the picker even with zero projects so the "+ New project" entry is visible.
+	// Initial items are bare (no Ghostty calls); async enrichment fills Status/Trailing.
 	items := buildBareItems(reg.Projects)
 
 	// Pre-populate form defaults from cwd, so that hitting `n` from the
@@ -81,11 +69,9 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		return err
 	}
 
-	// Action callbacks live inside the TUI loop — running them
-	// in-process means a successful delete/set-layout returns the user
-	// to a refreshed list rather than dropping them back to the shell.
-	// Each callback re-Loads the registry under the state lock to
-	// avoid racing with other shells.
+	// Action callbacks run in-process so successful mutations return the user to a
+	// refreshed list rather than dropping them to the shell. Each callback re-loads
+	// the registry under the state lock.
 	onDelete := func(name string, purge bool) ([]string, error) {
 		var warns []string
 		err := a.Paths.WithLock(func() error {
@@ -97,10 +83,9 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 			if err != nil {
 				return err
 			}
-			// We're inside the alt-screen — the picker owns presentation.
-			// executeDelete no longer writes anything; all non-fatal
-			// side-effect failures come back as []string warnings.
-			var innerErr error
+		// We're inside the alt-screen — executeDelete writes nothing; non-fatal
+		// side-effect failures come back as []string warnings.
+		var innerErr error
 			warns, innerErr = executeDelete(ctx, a, freshReg, p, purge)
 			return innerErr
 		})
@@ -113,15 +98,8 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		return executeEdit(a, oldName, newName, newDir, newTemplate)
 	}
 	onOpenLayout := func(name string) tea.Cmd {
-		// Editor resolution mirrors `boo edit`: $EDITOR wins, $VISUAL
-		// is the fallback. If neither is set we surface the issue
-		// inside the picker (via editorFinishedMsg → screenError)
-		// rather than silently doing nothing.
-		//
-		// Confirm the project is still registered + the layout file
-		// exists before suspending the alt-screen. A "no such file"
-		// after the editor has stolen the terminal would be much
-		// more disruptive than reporting it inline.
+		// Editor resolution mirrors `boo edit`: $EDITOR wins, $VISUAL is the fallback.
+		// Verify the project and layout file exist before suspending the alt-screen.
 		freshReg, err := project.Load(a.Paths)
 		if err != nil {
 			return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
@@ -140,8 +118,8 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		if err != nil {
 			return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
 		}
-		// tea.ExecProcess wires Stdin/Stdout/Stderr to the controlling
-		// terminal automatically and restores the alt-screen on exit.
+		// tea.ExecProcess wires Stdin/Stdout/Stderr to the controlling terminal and restores
+		// the alt-screen on exit.
 		return tea.ExecProcess(ed, func(err error) tea.Msg {
 			return picker.NewEditorFinishedMsg(err)
 		})
@@ -149,18 +127,13 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	refresh := func() ([]picker.Item, error) {
 		freshReg, err := project.Load(a.Paths)
 		if err != nil {
-			// Refresh failures are non-fatal — the picker will leave
-			// the existing items alone. The user can still navigate;
-			// the next action will re-load the registry under the lock.
+			// Non-fatal — picker keeps existing items; next action re-loads under lock.
 			return nil, err
 		}
 		return buildPickerItems(ctx, a, freshReg.Projects), nil
 	}
 
-	// onLaunch runs the project launch in a background tea.Cmd so the
-	// picker stays alive while the Ghostty window opens or switches
-	// focus. The cmd emits a LaunchFinishedMsg when done so the picker
-	// can update its status bar and re-enrich items.
+	// onLaunch runs the project launch as a background tea.Cmd so the picker stays alive.
 	onLaunch := func(name string) tea.Cmd {
 		return func() tea.Msg {
 			freshReg, err := project.Load(a.Paths)
@@ -175,9 +148,7 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		}
 	}
 
-	// Check whether the configured theme loaded successfully. If not,
-	// surface a startup warning so the user knows the picker fell back
-	// to the default theme — without this the fallback is invisible.
+	// Surface a startup warning when the configured theme couldn't be loaded.
 	themeName := a.Config.ThemeOr("default")
 	_, themeOK := picker.ThemeByName(a.Paths.ThemesDir, themeName)
 	var startupWarning string
@@ -207,17 +178,12 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	if res.Cancelled() {
 		return nil
 	}
-	// Only handoff intents (Switch, NewProject) reach this point —
-	// mutating actions are handled inside the picker loop. The default
-	// arm catches programmer error if the picker ever returns an
-	// unexpected type, e.g. after a refactor regression.
+	// Only handoff intents (Switch, NewProject) reach this point.
 	switch v := res.Intent.(type) {
 	case picker.NewProjectIntent:
 		return runCreateProject(ctx, a, v, out)
 	case picker.SwitchIntent:
-		// Re-load the registry: the user may have deleted other
-		// projects during the picker session, but the one they're
-		// switching to should still be present.
+		// Re-load the registry: user may have deleted projects during the session.
 		freshReg, err := project.Load(a.Paths)
 		if err != nil {
 			return err
@@ -266,14 +232,9 @@ func buildPickerItems(ctx context.Context, a *app, projects []project.Project) [
 	return out
 }
 
-// buildBareItems builds a lightweight []picker.Item from registry data only
-// — no Ghostty calls, no filesystem stats. Status and Trailing are left
-// empty; they are filled in by async enrichment (picker.Init fires the
-// RefreshItems callback in the background).
-//
-// Used as the initial item set for the main TUI picker so picker.Run returns
-// immediately even with many projects. The fzf and delete-picker paths use
-// buildPickerItems directly since they need complete data up front.
+// buildBareItems builds lightweight []picker.Item from registry data only (no Ghostty calls).
+// Status/Trailing are left empty; filled later by async enrichment via RefreshItems.
+// Used as the initial item set for the main TUI picker so picker.Run returns immediately.
 func buildBareItems(projects []project.Project) []picker.Item {
 	out := make([]picker.Item, 0, len(projects))
 	for _, p := range projects {
@@ -297,9 +258,7 @@ func pickViaFzf(ctx context.Context, items []picker.Item) (string, error) {
 	if _, err := exec.LookPath("fzf"); err != nil {
 		return "", errors.New("fzf is not on $PATH (install fzf, or run 'boo' for the built-in picker)")
 	}
-	// fzf needs a real TTY for its UI. If we're not attached to one
-	// (script, pipe, CI), fzf will silently hang waiting for keystrokes
-	// it can never receive. Fail fast with a clear message instead.
+	// fzf needs a real TTY. Fail fast with a clear message rather than hanging.
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		return "", errors.New("boo fzf needs a terminal for fzf's UI (stdout isn't a TTY)")
 	}
@@ -354,11 +313,9 @@ func pickViaFzf(ctx context.Context, items []picker.Item) (string, error) {
 	return line, nil
 }
 
-// runFzf shells out to fzf directly rather than going through internal/exec's
-// Runner. fzf is interactive and TTY-bound; the Runner abstraction is built
-// around captured-buffer stdout/stderr, which doesn't model an interactive
-// TUI. Documented exception to the project-wide "all shellouts via Runner"
-// rule.
+// runFzf shells out to fzf directly (not via internal/exec Runner). fzf is interactive
+// and TTY-bound; Runner's capture-buffer model can't support that. Documented exception
+// to the project-wide "all shellouts via Runner" rule. See also editor.go, picker_helpers.go.
 func runFzf(ctx context.Context, args []string, stdin string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "fzf", args...)
 	cmd.Stdin = strings.NewReader(stdin)
@@ -366,14 +323,9 @@ func runFzf(ctx context.Context, args []string, stdin string) ([]byte, error) {
 	return cmd.Output()
 }
 
-// templatePreviewer returns a callback suitable for picker.Options.PreviewTemplate.
-// It resolves the template name through the same path `boo new` will use,
-// then renders it via internal/layoutpreview. Empty result on any error so
-// the form silently hides the preview while the user is mid-typing an
-// unknown name — surfacing a stack trace inside a TUI form would be hostile.
-//
-// previewWidth (50) matches `boo layouts` so what the user sees in the form
-// is byte-identical to what they'd see from the command line.
+// templatePreviewer returns a picker.Options.PreviewTemplate callback that resolves the
+// template via the same path boo new uses and renders it via layoutpreview.
+// Returns "" on any error so the form silently hides the preview for unknown names.
 func templatePreviewer(a *app) func(string) string {
 	const previewWidth = 50
 	return func(name string) string {
@@ -389,16 +341,8 @@ func templatePreviewer(a *app) func(string) string {
 	}
 }
 
-// templateNames returns the list of layout template names visible to
-// `boo new` (built-ins + any user overrides), suitable for
-// picker.Options.LayoutNames so the TUI can render the Layout field
-// as a left/right cycler instead of a free-text input.
-//
-// On any error reading the user templates dir we silently return nil,
-// which falls back to the legacy free-text input. The form preview
-// already silently hides on resolve errors, so the user can still
-// type a known name and see it work. We never want a transient I/O
-// error to make `boo new`'s TUI unusable.
+// templateNames returns layout template names visible to boo new (built-ins + user overrides).
+// Returns nil on any error so the form falls back to free-text input.
 func templateNames(a *app) []string {
 	names, err := layout.ListTemplates(a.Paths.LayoutsDir)
 	if err != nil {
@@ -415,26 +359,14 @@ func pickerTheme(a *app) picker.Theme {
 	return thm
 }
 
-// projectPreviewer returns a callback suitable for
-// picker.Options.PreviewProject. It renders a multi-line summary of one
-// project: name, dir, layout template, status, last-launched, and an
-// ASCII layout preview.
+// projectPreviewer returns a picker.Options.PreviewProject callback that renders a
+// multi-line project summary: name, dir, layout, status, last-launched, layout preview.
 //
-// thm is the active picker theme; its style slots replace the hard-coded
-// ANSI colours from earlier implementations so the preview stays legible
-// on both dark and light terminal backgrounds.
+// Re-loads the registry on every invocation so in-loop mutations (Edit, SetLayout) are
+// reflected immediately in the right pane without staleness.
 //
-// The closure captures ctx + a (paths/ghostty) but **re-loads the
-// registry on every invocation**. This is intentional: in-loop actions
-// like Edit and SetLayout mutate the registry on disk, and a stale
-// captured *Registry would render outdated dir/layout in the right pane
-// after a successful action. Registry load is a small TOML read — cheap
-// enough to do per repaint. Mirrors templatePreviewer's "always read
-// the source of truth" stance.
-//
-// rightPaneInnerWidth (36) matches picker.rightPaneWidth (40) minus the
-// border (2) and padding (2). Hardcoded for now; if the right pane
-// becomes dynamic-width we'll thread the width through this callback.
+// rightPaneInnerWidth (36) = picker.rightPaneWidth (40) − border (2) − padding (2).
+// Must be kept in sync with geometry.go if rightPaneWidth changes.
 func projectPreviewer(ctx context.Context, a *app, thm picker.Theme) func(string) string {
 	const rightPaneInnerWidth = 36
 	if ctx == nil {
@@ -470,22 +402,14 @@ func projectPreviewer(ctx context.Context, a *app, thm picker.Theme) func(string
 		// Title row — use theme accent so it matches the list's selected-title.
 		b.WriteString(boldAccent(thm, p.Name))
 		b.WriteString("\n\n")
-		// Two-column key/value rows. Keys are faint (theme); values plain.
-		// dir is shortened to fit the pane: $HOME → ~ first, then a
-		// head-ellipsis if it's still too long. The "dir  " prefix
-		// (faint key + 2 spaces) eats 5 cols, leaving rightPaneInnerWidth-5
-		// for the value itself.
+		// dir is shortened to fit: $HOME→~ first, then head-ellipsis. "dir  " prefix = 5 cols.
 		writeRow(&b, thm, "dir", shortenPath(p.Dir, rightPaneInnerWidth-5))
 		writeRow(&b, thm, "layout", p.Layout)
 		writeRow(&b, thm, "status", renderStatusFor(thm, status))
 		writeRow(&b, thm, "last", lastLaunched)
 
-		// Layout preview underneath.
-		// Prefer the saved snapshot (layout.yaml) which reflects any edits
-		// made via `boo edit` or `boo save` since registration. Fall back to
-		// the template only when no saved file exists yet. Any other error
-		// (parse failure, permission denied, etc.) renders an explicit error
-		// message so a malformed layout.yaml never silently shows stale data.
+		// Prefer saved snapshot (layout.yaml) which reflects boo edit/save edits.
+		// Fall back to template only when no saved file exists. Other errors render inline.
 		var rendered string
 		if saved, err := project.LoadLayout(a.Paths, p.Name); err == nil {
 			rendered = layoutpreview.RenderLayout(saved, rightPaneInnerWidth)
@@ -506,10 +430,7 @@ func projectPreviewer(ctx context.Context, a *app, thm picker.Theme) func(string
 	}
 }
 
-// boldAccent / faint / writeRow / renderStatusFor are tiny rendering
-// helpers shared by projectPreviewer. Each takes the active picker.Theme
-// so colours are derived from the theme rather than hard-coded ANSI values,
-// keeping the preview legible on both dark and light terminal backgrounds.
+// boldAccent / faint / writeRow / renderStatusFor are tiny theme-aware rendering helpers.
 func boldAccent(thm picker.Theme, s string) string {
 	return thm.RightPaneTitle.Render(s)
 }
@@ -536,11 +457,8 @@ func renderStatusFor(thm picker.Theme, s string) string {
 	}
 }
 
-// shortenPath collapses $HOME → ~ and head-ellipsises the result so it
-// fits in maxWidth runes. Returns p unchanged if maxWidth <= 0 or if
-// the (possibly home-collapsed) path already fits. Falls back to a
-// "…<tail>" form when truncation is needed; we keep the *tail* because
-// the leaf directory is the most identifying part of a project path.
+// shortenPath collapses $HOME→~ then head-ellipsises to fit maxWidth runes.
+// Keeps the tail because the leaf dir is the most identifying part of a path.
 func shortenPath(p string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return p
@@ -555,7 +473,7 @@ func shortenPath(p string, maxWidth int) string {
 	if len([]rune(p)) <= maxWidth {
 		return p
 	}
-	// Head-ellipsis: keep the last (maxWidth-1) runes, prefix "…".
+	// Head-ellipsis: keep last (maxWidth-1) runes, prefix "…".
 	r := []rune(p)
 	return "…" + string(r[len(r)-(maxWidth-1):])
 }

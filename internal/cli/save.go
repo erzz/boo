@@ -17,10 +17,8 @@ import (
 	"github.com/erzz/boo/internal/project"
 )
 
-// isLayoutParseError reports whether err came from layout decoding (YAML
-// parse / validate) rather than the underlying filesystem. The layout
-// package wraps both with the prefix "layout:", so a substring check is
-// sufficient and keeps us from leaking knowledge of the parser internals.
+// isLayoutParseError reports whether err came from layout decoding.
+// The layout package wraps parse/validate errors with a "layout:" prefix.
 func isLayoutParseError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "layout:")
 }
@@ -174,20 +172,12 @@ still printed to stderr under --force so audit logs show what was lost.`,
 				_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: %s\n", w)
 			}
 
-			// Compare against the previously-saved layout so we only nag the
-			// user when something actually changed (and especially when
-			// something that boo can't recover is about to be wiped).
-			//
-			// Error handling here is deliberately narrow:
-			//   - missing file (first save) → treat as no previous → silent path.
-			//   - parse error (corrupt or hand-edited junk) → warn loudly and
-			//     fall through to the full diff/prompt against an empty
-			//     previous, so the user can recover by saving over the
-			//     corrupt file rather than being blocked by it.
-			//   - other read errors (permissions, I/O) → hard error. We are
-			//     about to overwrite the same file; if we can't even read
-			//     it, refusing to save is safer than silently clobbering.
-			var prev layout.Layout
+		// Compare against the previously-saved layout.
+		// Error handling:
+		//   - missing file (first save) → treat as no previous → silent path.
+		//   - parse error (corrupt file) → warn and fall through so user can recover by saving over it.
+		//   - other read errors (permissions) → hard error; refusing to overwrite is safer.
+		var prev layout.Layout
 			loaded, perr := project.LoadLayout(a.Paths, p.Name)
 			switch {
 			case perr == nil:
@@ -201,23 +191,16 @@ still printed to stderr under --force so audit logs show what was lost.`,
 			}
 			diff := diffForSave(prev, newLayout)
 
-			// Fold prev's invisible-but-stable fields (command, env,
-			// initial_input, non-default direction) into the captured
-			// layout so common re-saves stop being lossy. The merged
-			// value is what we write AND what the diff reflects, so the
-			// user sees an honest before/after.
-			merged, mergeLost := mergeForSave(prev, newLayout)
+		// Fold prev's invisible fields (command, env, initial_input, direction) into the
+		// captured layout. The merged value is what we write AND what the diff reflects.
+		merged, mergeLost := mergeForSave(prev, newLayout)
 			if err := merged.Validate(); err != nil {
 				return fmt.Errorf("merged layout failed validation: %w", err)
 			}
 			diff = diffForSave(prev, merged)
-			if len(mergeLost) > 0 {
-				// Anything the merge couldn't carry (dropped tabs/splits
-				// that held command/env/etc.) gets surfaced as an extra
-				// loss reason. Promote the outcome to Lossy if it isn't
-				// already, so the user is prompted before we destroy
-				// data.
-				diff.LossReasons = append(diff.LossReasons, mergeLost...)
+		if len(mergeLost) > 0 {
+			// Promote to Lossy if merge dropped tabs/splits with command/env/etc.
+			diff.LossReasons = append(diff.LossReasons, mergeLost...)
 				if diff.Outcome != OutcomeLossy {
 					diff.Outcome = OutcomeLossy
 				}
@@ -243,25 +226,9 @@ still printed to stderr under --force so audit logs show what was lost.`,
 	return cmd
 }
 
-// applySaveOutcome handles the user-facing side of an honest-save: render
-// the diff (when relevant), prompt for confirmation (unless --force), and
-// report whether the caller should proceed with writing the layout.
-//
-// Three branches mirror diffForSave's outcomes:
-//   - Silent     → no output, no prompt, proceed.
-//   - Structural → render diff to stdout, prompt unless force.
-//   - Lossy      → render diff to STDERR (so --force still leaves a trace
-//     for scripts/CI), prompt unless force.
-//
-// Returning (false, nil) means the user declined; the caller is responsible
-// for printing "aborted" in whatever style fits its surrounding output.
-// Errors only come from the prompt's IO; any error means the save is
-// aborted and surfaced to the user.
-//
-// Extracted out of RunE so it can be tested without standing up a full app
-// (which would require a Ghostty fake, a temp paths root, and a registry).
-// The decision matrix here is the part most worth pinning down with tests;
-// the rest of RunE is straight-line plumbing.
+// applySaveOutcome renders the diff and optionally prompts for confirmation.
+// Returns (true, nil) to proceed, (false, nil) if the user declined.
+// Extracted for testability — the decision matrix is the part most worth pinning down.
 func applySaveOutcome(diff SaveDiff, force bool, in io.Reader, out, errOut io.Writer) (bool, error) {
 	switch diff.Outcome {
 	case OutcomeSilent:
@@ -279,27 +246,14 @@ func applySaveOutcome(diff SaveDiff, force bool, in io.Reader, out, errOut io.Wr
 		}
 		return confirm(in, out, "Save anyway and lose the unrecoverable data above?")
 	default:
-		// Defensive: an unknown outcome shouldn't reach here, but if it
-		// does, prefer "block the save and tell the user" over silently
-		// proceeding. This mirrors the rest of save.go's "refuse to
-		// overwrite when uncertain" stance.
+		// Unknown outcome: block the save rather than silently proceeding.
 		return false, fmt.Errorf("internal error: unknown save outcome %v", diff.Outcome)
 	}
 }
 
-// frontWindowMatch is the result of matching Ghostty's focused window
-// against the project registry.
-//
-// Exactly one of project / unregisteredCwd is populated when the function
-// returns nil error AND a window was focused:
-//   - project        → focused window belongs to this registered project
-//   - unregisteredCwd → focused window exists but no registered project
-//     owns it; cwd is the focused terminal's working dir
-//     (best-effort; may be "" if Describe failed)
-//
-// When no Ghostty window is focused, the function returns a clean error
-// rather than an empty match — there's nothing actionable to do in that
-// case for `boo save`.
+// frontWindowMatch is the result of matching Ghostty's focused window against the registry.
+// Exactly one of project / unregisteredCwd is populated on nil error when a window is focused.
+// When no window is focused, returns a clean error (nothing actionable for `boo save`).
 type frontWindowMatch struct {
 	project         *project.Project
 	unregisteredCwd string
@@ -326,19 +280,14 @@ func matchFrontWindow(ctx context.Context, a *app, reg *project.Registry) (front
 		}
 	}
 
-	// 2. WindowID didn't match (Ghostty restarted, window opened outside
-	//    boo, etc.) — try to recover by matching the focused terminal's
-	//    working directory against registered project dirs. This is the
-	//    common case after a Ghostty restart: the runtime files still hold
-	//    stale IDs but the user is clearly *in* the project's directory.
+	// 2. WindowID didn't match (Ghostty restarted, window opened outside boo) —
+	//    try to recover by matching the focused terminal's cwd against registered dirs.
 	cwd := ""
 	if desc, derr := a.Ghostty.DescribeWindow(ctx, id); derr == nil {
 		cwd = firstTerminalCwd(desc)
 		if cwd != "" {
 			if p, err := reg.FindByDir(cwd); err == nil {
-				// Refresh the runtime WindowID so the rest of `save` works
-				// against this window. Without this update, the caller would
-				// hit the "no live window to capture" branch.
+				// Refresh the stale WindowID so the rest of `save` can capture the window.
 				if rt, rerr := project.LoadRuntime(a.Paths, p.Name); rerr == nil {
 					rt.WindowID = id
 					_ = project.SaveRuntime(a.Paths, p.Name, rt)
@@ -370,35 +319,13 @@ func firstTerminalCwd(d *ghostty.DescribedWindow) string {
 	return ""
 }
 
-// capturedToLayout projects a Ghostty DescribedWindow into boo's layout
-// vocabulary as a flat tree.
+// capturedToLayout projects a Ghostty DescribedWindow into boo's layout vocabulary.
 //
-// Why flat
-// --------
-// Ghostty's AppleScript dictionary returns a per-tab list of terminals
-// with no information about how they're nested or split. We have no
-// way to recover the tree shape from a live capture, so capture always
-// emits the canonical flat representation:
-//
-//   - 1 terminal in a tab → a single leaf as the tab's root.
-//   - N terminals       → a right-leaning chain of `row` splits
-//     (built by save_merge's buildFlatRoot).
-//
-// mergeForSave is then responsible for either preserving the previous
-// tab's tree shape (when leaf counts match) or accepting this flat
-// shape (when they don't, surfacing the loss in the diff).
-//
-// The conversion rules:
-//   - Each captured tab becomes one layout.Tab.
-//   - Each terminal becomes one leaf (cwd from terminal.WorkingDirectory,
-//     made relative to the project root if it lives under it).
-//   - Tab names are preserved when non-empty.
-//
-// What is NOT captured (use the diff to surface contextually):
-//   - command (Ghostty doesn't expose the original launch command)
-//   - env    (likewise)
-//   - tree shape (Ghostty's API gives a flat list)
-//   - initial_input
+// Ghostty's AppleScript API returns only a flat terminal list per tab — no
+// split tree, no command, no env. Capture always emits a flat representation:
+// 1 terminal → single leaf; N terminals → right-leaning row chain.
+// mergeForSave then either restores the previous tree shape (leaf counts match)
+// or accepts the flat shape (counts differ, surfacing the loss in the diff).
 func capturedToLayout(p project.Project, desc *ghostty.DescribedWindow) (layout.Layout, []string) {
 	out := layout.Layout{Name: p.Layout}
 	if out.Name == "" {
@@ -407,11 +334,8 @@ func capturedToLayout(p project.Project, desc *ghostty.DescribedWindow) (layout.
 
 	var warnings []string
 	for _, dt := range desc.Tabs {
-		// A tab must have at least one terminal for the layout to
-		// validate. Defensive: Ghostty shouldn't return a tab with no
-		// terminals, but if it does we drop the tab and warn rather
-		// than producing an invalid layout.
 		if len(dt.Terminals) == 0 {
+			// Ghostty shouldn't return a tab with no terminals, but drop and warn defensively.
 			warnings = append(warnings, fmt.Sprintf("tab %q had no terminals; dropped", dt.Name))
 			continue
 		}
@@ -427,10 +351,8 @@ func capturedToLayout(p project.Project, desc *ghostty.DescribedWindow) (layout.
 	return out, warnings
 }
 
-// relativiseCwd returns cwd as a path relative to projectDir if it lives
-// under it (cleaner layout files; "." for the root). Otherwise the absolute
-// path is returned unchanged. Symlinks are not resolved — Ghostty's reported
-// cwd may already be canonicalised.
+// relativiseCwd returns cwd relative to projectDir if it lives under it
+// ("." for the root). Otherwise returns the absolute path unchanged.
 func relativiseCwd(projectDir, cwd string) string {
 	if cwd == "" {
 		return "."

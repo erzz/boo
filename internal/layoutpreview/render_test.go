@@ -7,13 +7,10 @@ import (
 	"github.com/erzz/boo/internal/layout"
 )
 
-// These tests pin down the structural guarantees of the renderer
-// (uniform width, exact height, correct shape for the canonical
-// `triple` layout) without locking in the exact ASCII output —
-// painted-cell content is harder to keep stable across editing rounds.
+// render_test.go pins structural guarantees of the renderer (uniform width, exact height, correct shape)
+// without locking in exact ASCII output — painted-cell content is harder to keep stable.
 
-// rowOf builds a row split with the given children — small helper to
-// keep test fixtures readable.
+// rowOf builds a row split — small helper to keep test fixtures readable.
 func rowOf(children ...layout.Split) layout.Split {
 	return layout.Split{Direction: layout.DirRow, Children: children}
 }

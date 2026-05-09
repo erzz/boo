@@ -1,14 +1,6 @@
 // Layout template resolution.
-//
-// `boo new --layout <name>` resolves the layout in this order:
-//
-//  1. User template at $XDG_CONFIG_HOME/boo/layouts/<name>.yaml (if present).
-//  2. Built-in template embedded in the binary (the curated `1x1x1`,
-//     `1x2x1`, `1x1x2`, `1x2x2`, `2x1x1`, `2x2x1`, `2x2x2`, plus `triple`).
-//
-// Built-ins ensure `boo new` works on a clean machine. User templates always
-// win on name collision so users can override even built-ins by dropping a
-// file with the same name in their layouts dir.
+// Resolution order: user template at $XDG_CONFIG_HOME/boo/layouts/<name>.yaml,
+// then built-in embedded templates. User templates shadow built-ins on name collision.
 
 package layout
 
@@ -33,13 +25,9 @@ const (
 	SourceBuiltin TemplateSource = "builtin"
 )
 
-// ResolvedTemplate is a layout template plus where it was loaded from.
-//
-// Description is the leading-comment block from the source YAML
-// (extracted before parsing, since the YAML parser strips comments).
-// It is purely template metadata for `boo layouts` and the new-project
-// preview — it is NOT carried into the runtime layout files written
-// per project. See extractDescription for the format we recognise.
+// ResolvedTemplate is a layout template plus its load source.
+// Description is extracted from the YAML leading-comment block (stripped by
+// the parser); used by `boo layouts` and the new-project preview only.
 type ResolvedTemplate struct {
 	Layout      Layout
 	Source      TemplateSource
@@ -102,29 +90,16 @@ func ResolveTemplate(layoutsDir, name string) (ResolvedTemplate, error) {
 	}, nil
 }
 
-// extractDescription pulls a human-readable description out of the
-// leading comment block of a YAML template.
-//
-// Rules:
-//   - Only consecutive lines from the very top of the file count.
-//     The block ends at the first non-comment, non-blank line.
-//   - Each line must start with '#' (with optional leading whitespace).
-//     A single leading space after the '#' is stripped for readability,
-//     so `# foo` and `#foo` both yield `foo`.
-//   - A blank comment line (`#` alone) marks a paragraph break and is
-//     emitted as a blank line in the output.
-//   - Trailing blank paragraph lines are trimmed.
-//
-// Returns "" if no leading comment block is present. This keeps the
-// `boo layouts` listing tidy for templates that don't bother with a
-// description — they get name + path only.
+// extractDescription pulls a description from the leading comment block of a
+// YAML template. Only consecutive lines from the very top count; the block ends
+// at the first non-comment, non-blank line. A leading space after '#' is stripped.
+// Returns "" if no leading comment block is present.
 func extractDescription(data []byte) string {
 	var lines []string
 	for _, raw := range strings.Split(string(data), "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
-			// Blank lines between comment lines end the block. We
-			// only want the very first contiguous block.
+			// Blank line ends the contiguous comment block.
 			break
 		}
 		if !strings.HasPrefix(line, "#") {
@@ -192,10 +167,7 @@ func stripYAMLExt(filename string) (string, bool) {
 	return strings.TrimSuffix(filename, ".yaml"), true
 }
 
-// validTemplateName rejects path traversal and anything that isn't a plain
-// identifier. Templates live as `<name>.yaml` inside layoutsDir or the
-// embedded FS; we never want a "../foo" or "/etc/passwd" lookup to slip
-// through.
+// validTemplateName rejects path traversal so a "../foo" lookup can't escape layoutsDir.
 func validTemplateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("layout template name is empty")
@@ -206,6 +178,5 @@ func validTemplateName(name string) error {
 	return nil
 }
 
-// ensure embed.FS is used in non-test builds so the linter doesn't complain
-// in environments where only ListTemplates is called.
+// ensure embed.FS is used in non-test builds.
 var _ fs.FS = bundledTemplates

@@ -11,17 +11,8 @@ import (
 	"github.com/erzz/boo/internal/project"
 )
 
-// newShowCmd implements `boo show <name>` — print everything boo knows
-// about a single project.
-//
-// This is the diagnostic primitive that `boo list` is too narrow to
-// serve: when a user wants to know "where is this project's layout
-// file, when did I last open it, is the window actually alive right
-// now", they should be able to ask without opening a TUI or grepping
-// `boo list`'s columns.
-//
-// Output is human-formatted, two-column by default. Pass --json for
-// machine-readable JSON (snake_case keys, RFC 3339 timestamps).
+// newShowCmd implements `boo show <name>` — print the full record for one project.
+// --json emits snake_case JSON (RFC 3339 timestamps) for scripting.
 func newShowCmd() *cobra.Command {
 	var jsonOut bool
 	cmd := &cobra.Command{
@@ -52,9 +43,7 @@ Use --json to emit a single JSON object suitable for scripting.`,
 			}
 			rt, _ := project.LoadRuntime(a.Paths, name)
 
-			// Status calculation mirrors buildPickerItems so a
-			// user comparing `boo show X` against `boo list`
-			// sees the same word for the same state.
+			// Status calculation mirrors buildPickerItems — same word for same state.
 			status := "stopped"
 			switch {
 			case !dirExists(p.Dir):
@@ -108,8 +97,7 @@ Use --json to emit a single JSON object suitable for scripting.`,
 	return cmd
 }
 
-// showOutputJSON is the JSON shape for `boo show --json`. Uses snake_case
-// to match the project.Runtime JSON convention (window_id, last_launched_at).
+// showOutputJSON is the JSON shape for `boo show --json`. Snake_case matches project.Runtime convention.
 type showOutputJSON struct {
 	Name           string     `json:"name"`
 	Dir            string     `json:"dir"`

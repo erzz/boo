@@ -8,11 +8,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// errFake is a sentinel error used by tests that want to verify the
-// picker's failure path (showError) renders the message.
+// errFake is a sentinel used by tests that exercise the picker's failure / showError path.
 var errFake = errors.New("fake")
 
-// helper: drive a key press through model.Update.
+// pressKey drives a single key through model.Update.
 func pressKey(t *testing.T, m *model, s string) *model {
 	t.Helper()
 	var msg tea.KeyMsg
@@ -28,9 +27,7 @@ func pressKey(t *testing.T, m *model, s string) *model {
 	return updated.(*model)
 }
 
-// modelWithDelete returns a model with a stub delete callback attached
-// so the d/D keys are live. The callback records calls into the
-// returned slice for assertion.
+// modelWithDelete returns a model with a stub delete callback; calls recorded in returned slice.
 func modelWithDelete(items ...Item) (*model, *[]string) {
 	m := sizedModel(120, items...)
 	calls := []string{}
@@ -46,10 +43,7 @@ func modelWithDelete(items ...Item) (*model, *[]string) {
 	return m, &calls
 }
 
-// Pressing 'd' on a project Item opens the confirm modal pre-loaded
-// with a DeleteIntent for that project. The modal is rendered as the
-// whole screen while active, so View() should contain the modal text
-// and the project name.
+// TestList_DPressOpensDeleteConfirm: 'd' opens the confirm modal with a DeleteIntent for the selected project.
 func TestList_DPressOpensDeleteConfirm(t *testing.T) {
 	m, _ := modelWithDelete(
 		Item{Key: "alpha", Title: "alpha", Description: "/tmp/alpha"},
@@ -76,8 +70,7 @@ func TestList_DPressOpensDeleteConfirm(t *testing.T) {
 	}
 }
 
-// Pressing 'D' opens the same modal with Purge:true, and the title
-// reflects that the window will also be closed.
+// TestList_ShiftDPressOpensPurgeConfirm: 'D' opens the modal with Purge:true and "close window" title.
 func TestList_ShiftDPressOpensPurgeConfirm(t *testing.T) {
 	m, _ := modelWithDelete(
 		Item{Key: "alpha", Title: "alpha", Description: "/tmp/alpha"},
@@ -95,8 +88,7 @@ func TestList_ShiftDPressOpensPurgeConfirm(t *testing.T) {
 	}
 }
 
-// Confirming the modal invokes the OnDelete callback and returns to
-// the list with no intent set (the action was handled in-loop).
+// TestConfirm_YesInvokesCallback: confirming the modal calls OnDelete and returns to the list.
 func TestConfirm_YesInvokesCallback(t *testing.T) {
 	m, calls := modelWithDelete(Item{Key: "alpha", Title: "alpha", Description: "/tmp/alpha"})
 	m = pressKey(t, m, "d")
@@ -113,8 +105,7 @@ func TestConfirm_YesInvokesCallback(t *testing.T) {
 	}
 }
 
-// If OnDelete returns an error, the picker shows the error screen
-// (rather than emitting an intent or silently succeeding).
+// TestConfirm_YesErrorShowsErrorScreen: OnDelete error → screenError (not silent success).
 func TestConfirm_YesErrorShowsErrorScreen(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/alpha"})
 	m.onDelete = func(name string, purge bool) ([]string, error) { return nil, errFake }
@@ -136,7 +127,7 @@ func TestConfirm_YesErrorShowsErrorScreen(t *testing.T) {
 	}
 }
 
-// Cancelling the modal returns to the list with no intent set.
+// TestConfirm_NoReturnsToList: cancelling the modal returns to screenList with no intent.
 func TestConfirm_NoReturnsToList(t *testing.T) {
 	m, _ := modelWithDelete(Item{Key: "alpha", Title: "alpha", Description: "/tmp/alpha"})
 	m = pressKey(t, m, "d")
@@ -153,8 +144,7 @@ func TestConfirm_NoReturnsToList(t *testing.T) {
 	}
 }
 
-// 'd' on the "+ New project" row is a no-op (DeleteIntent makes no
-// sense for the synthetic row).
+// TestList_DPressOnNewProjectRowIsNoop: 'd' on "+ New project" row is a no-op.
 func TestList_DPressOnNewProjectRowIsNoop(t *testing.T) {
 	m, _ := modelWithDelete() // no items → only the synthetic row is selectable
 	m = pressKey(t, m, "d")
@@ -163,8 +153,7 @@ func TestList_DPressOnNewProjectRowIsNoop(t *testing.T) {
 	}
 }
 
-// 'd' is dead-keyed (no help, no handler) when OnDelete is nil — the
-// picker can't reach a code path that has nothing to do.
+// TestList_DPressNoCallbackIsNoop: 'd' is dead-keyed when OnDelete is nil.
 func TestList_DPressNoCallbackIsNoop(t *testing.T) {
 	m := sizedModel(120, Item{Key: "alpha", Title: "alpha", Description: "/tmp/alpha"})
 	// Deliberately no onDelete.

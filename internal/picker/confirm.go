@@ -7,15 +7,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// confirmModel is a generic yes/no modal used by destructive actions.
-// It carries a title, body, and the intent to emit if the user
-// confirms. The owner (model.Update) handles the y/n keys via the
-// shared keymap and turns "yes" into mm.intent + tea.Quit.
-//
-// We keep this as a plain data struct (not a tea.Model) because the
-// surrounding model already has the message loop; nesting a second
-// Update would make the cancel/back routing harder than it's worth for
-// a 6-line modal.
+// confirmModel is a generic yes/no modal for destructive actions.
+// Not a tea.Model — the surrounding model owns the message loop; nesting a second
+// Update would complicate cancel/back routing for a 6-line modal.
 type confirmModel struct {
 	title string
 	body  string
@@ -24,12 +18,8 @@ type confirmModel struct {
 	pending Intent
 }
 
-// view renders the modal centred-ish using lipgloss. We don't actually
-// overlay on top of the list view (lipgloss doesn't support true
-// overlays without tea.WithAltScreen tricks); instead we render the
-// modal as the whole screen while screenConfirm is active. Lazygit and
-// k9s both do the same and it reads as a "modal" because the
-// surrounding chrome disappears.
+// view renders the modal as the full screen (same approach as lazygit/k9s — surrounding chrome
+// disappears while the modal is active, reading as a true modal without alt-screen tricks).
 func (c confirmModel) view(t Theme, _ int, _ int) string {
 	var b strings.Builder
 	b.WriteString(t.RightPaneTitle.Render(c.title))
@@ -45,9 +35,7 @@ func (c confirmModel) view(t Theme, _ int, _ int) string {
 	return box
 }
 
-// formatDeleteBody renders the per-project body text for a delete
-// confirmation. Spelled out here so the in-CLI prompt and the in-TUI
-// modal stay in sync about what gets touched.
+// formatDeleteBody renders the delete confirmation body for both the CLI prompt and TUI modal.
 func formatDeleteBody(name, dir string, purge bool) string {
 	body := fmt.Sprintf("Project: %s\nDirectory: %s\n\n"+
 		"The registry entry and per-project state will be removed.\n"+

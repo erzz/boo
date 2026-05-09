@@ -8,21 +8,11 @@ import (
 	"github.com/erzz/boo/internal/picker"
 )
 
-// TestProjectPreviewer_ThemeColors verifies that projectPreviewer is wired to
-// use the supplied picker.Theme rather than hard-coded ANSI colour values.
+// TestProjectPreviewer_ThemeColors: projectPreviewer must use the supplied picker.Theme, not hard-coded colours.
 //
-// In a CI environment without a real TTY, lipgloss strips ANSI codes from
-// rendered output, so both themes produce identical plain text. Instead of
-// comparing rendered strings (which are unreliable in non-TTY contexts) we:
-//
-//  1. Confirm the two themes have structurally different styles (proving the
-//     theme palette is plumbed through to the lipgloss style objects).
-//  2. Smoke-test that the previewer returns non-empty content, which proves
-//     the code path exercised by the theme is executed without error.
-//
-// A future test that requires full ANSI output should force the termenv colour
-// profile via lipgloss.NewRenderer — left as a TODO for when the test
-// infrastructure supports it.
+// In CI (no real TTY) lipgloss strips ANSI, so both themes produce identical plain text. Instead:
+//  1. Confirm the two themes have structurally different styles (proves theme palette is plumbed through).
+//  2. Smoke-test that the previewer returns non-empty content (proves the theme code path executes).
 func TestProjectPreviewer_ThemeColors(t *testing.T) {
 	defaultThm, ok := picker.ThemeByName("", "default")
 	if !ok {
@@ -33,16 +23,14 @@ func TestProjectPreviewer_ThemeColors(t *testing.T) {
 		t.Fatal("could not load light theme")
 	}
 
-	// The "default" theme uses accent "#A594FF" and the "light" theme uses
-	// "#5B5BD6". This propagates to RightPaneTitle (used by boldAccent).
-	// If the two styles are DeepEqual the theme colours are not being plumbed
-	// through — most likely the old hard-coded lipgloss.Color("13") is back.
+	// "default" uses "#A594FF", "light" uses "#5B5BD6"; both land in RightPaneTitle.
+	// DeepEqual styles → theme colours not plumbed (hard-coded colour is back).
 	if reflect.DeepEqual(defaultThm.RightPaneTitle, lightThm.RightPaneTitle) {
 		t.Error("RightPaneTitle styles must differ between default and light themes; " +
 			"this means projectPreviewer is not using the theme argument")
 	}
 
-	// Smoke-test: previewer returns non-empty content for a real project.
+	// Smoke-test: previewer returns non-empty content.
 	a := makeAppForCmds(t)
 	dir := t.TempDir()
 	registerProjectForTest(t, a, "proj", dir, "triple")

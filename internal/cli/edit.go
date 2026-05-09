@@ -9,14 +9,8 @@ import (
 	"github.com/erzz/boo/internal/project"
 )
 
-// newEditCmd opens a project's per-project layout snapshot
-// (~/.config/boo/projects/<name>/layout.yaml) in $EDITOR.
-//
-// This is the power-user counterpart to `boo set-layout`: rather than
-// switching to a different template, the user can fine-tune the saved
-// shape directly. Validation happens lazily — the next `boo <name>`
-// will fail if the user saved broken YAML, mirroring `boo config edit`'s
-// behaviour.
+// newEditCmd opens a project's layout snapshot (~/.config/boo/projects/<name>/layout.yaml) in $EDITOR.
+// Validation is lazy — a broken file will error on next `boo <name>`, same as `boo config edit`.
 func newEditCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "edit <name>",
@@ -36,10 +30,7 @@ $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
 			}
 			name := args[0]
 
-			// Confirm the project exists. Editing a layout for a
-			// project boo doesn't know about would write a file
-			// that's never read — silently useless. Better to
-			// surface "no such project" up front.
+			// Confirm project exists — editing a layout for an unknown project writes a file that's never read.
 			reg, err := project.Load(a.Paths)
 			if err != nil {
 				return err
@@ -50,10 +41,7 @@ $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
 
 			path := a.Paths.ProjectLayoutFile(name)
 			if _, err := os.Stat(path); err != nil {
-				// The layout file should exist for any registered
-				// project — registration writes it. If it's
-				// missing, something has gone wrong; surface
-				// the path so the user can investigate.
+				// Layout file missing for a registered project — surface the path so the user can investigate.
 				return fmt.Errorf("layout file for project %q not found at %s: %w", name, path, err)
 			}
 			return openInEditor("", path)

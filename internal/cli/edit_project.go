@@ -10,40 +10,17 @@ import (
 	"github.com/erzz/boo/internal/project"
 )
 
-// executeEdit applies the user's desired post-edit values to an
-// existing project: rename, change directory, and/or switch template.
-// Used by the TUI's edit form (EditIntent dispatch); reusable for any
-// future `boo edit-project` CLI surface.
+// executeEdit applies post-edit values to an existing project: rename, change dir, switch template.
+// Used by the TUI edit form (EditIntent) and reusable for future `boo edit-project` surfaces.
 //
-// Semantics:
+// Per-field semantics: no-op fields (same value) are skipped. Renames migrate the state dir via
+// os.Rename. Template changes re-resolve and rewrite layout.yaml (hand-edits are destroyed).
+// Dir changes update the registry only — we do NOT validate the new dir exists (project may be
+// temporarily offline; boo doctor and the "dir-missing" pill already signal the issue).
 //
-//   - Each field is compared against the current value. No-op fields
-//     are skipped — passing the same name/dir/template back is fine
-//     and writes nothing.
-//   - Renames migrate the per-project state directory by os.Rename
-//     (cheap, atomic on the same filesystem) and replace the registry
-//     entry. The state dir holds layout.yaml + state.json; everything
-//     else (project source code) lives outside boo's data dir and is
-//     never touched.
-//   - Template changes re-resolve and rewrite layout.yaml, same as
-//     executeSetLayout. Hand-edits to the previous layout file are
-//     destroyed — matches the "I want this template now" intent.
-//   - Directory changes update the registry's Dir field only. We do
-//     NOT validate that the new dir exists — the project may be
-//     temporarily offline (external drive, sshfs, etc.) and we don't
-//     want to refuse a config change for that. `boo doctor` and the
-//     picker's "dir-missing" status pill already signal the issue.
-//
-// All checks and writes happen under the state lock so concurrent
-// shells can't race on the registry. On any error the function
-// returns without partial application — we either rename + save +
-// update together, or none of them.
-//
-// Caveat: if os.Rename succeeds but reg.Save fails (disk full, etc.),
-// the state dir is moved but the registry still points at the old
-// name. The next boo invocation will fail to find the layout under
-// the old name. Pre-release: no recovery code; user can `mv` the
-// state dir back manually. Post-release we'd add a journal step.
+// All changes happen under the state lock: either rename+save+update together, or none.
+// Caveat: if os.Rename succeeds but reg.Save fails, the state dir is moved but the registry
+// still points at the old name. Pre-release: no recovery code; user can mv back manually.
 func executeEdit(a *app, oldName, newName, newDir, newTemplate string) error {
 	newName = strings.TrimSpace(newName)
 	newDir = strings.TrimSpace(newDir)
@@ -63,9 +40,8 @@ func executeEdit(a *app, oldName, newName, newDir, newTemplate string) error {
 		return fmt.Errorf("resolve new directory: %w", err)
 	}
 
-	// Validate the new name even if it matches the old one — keeps
-	// the rule "every name in the registry passes ValidateName" true
-	// regardless of how the entry got there. Cheap.
+	// Validate the new name even if unchanged — keeps the invariant that every registered
+	// name passes ValidateName regardless of how it got there.
 	if err := project.ValidateName(newName); err != nil {
 		return err
 	}
@@ -88,9 +64,7 @@ func executeEdit(a *app, oldName, newName, newDir, newTemplate string) error {
 			return nil // nothing to do; treat as success
 		}
 
-		// Collision checks. Only meaningful when the corresponding
-		// field is changing — a project always "collides" with itself
-		// on the unchanged axes.
+		// Collision checks (only when the field is actually changing).
 		if nameChanged && reg.Has(newName) {
 			return fmt.Errorf("project %q already exists", newName)
 		}
@@ -100,10 +74,7 @@ func executeEdit(a *app, oldName, newName, newDir, newTemplate string) error {
 			}
 		}
 
-		// Re-resolve template up-front: a template typo should fail
-		// the edit *before* we rename the state dir, so a bad
-		// template name doesn't leave the user with a renamed
-		// project sitting on the old layout.
+		// Re-resolve template before rename so a bad name fails before touching the state dir.
 		var resolved layout.ResolvedTemplate
 		if tplChanged {
 			r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, newTemplate)
@@ -116,9 +87,7 @@ func executeEdit(a *app, oldName, newName, newDir, newTemplate string) error {
 			}
 		}
 
-		// Rename the state directory first. If this fails (permission,
-		// cross-device link, etc.) we abort before touching the
-		// registry, so on-disk state stays self-consistent.
+		// Rename the state dir first. If this fails, abort before touching the registry.
 		if nameChanged {
 			oldDir := a.Paths.ProjectDir(oldName)
 			newDirPath := a.Paths.ProjectDir(newName)
@@ -130,8 +99,7 @@ func executeEdit(a *app, oldName, newName, newDir, newTemplate string) error {
 			}
 		}
 
-		// Apply template change after the (potential) rename so we
-		// write into the new directory.
+		// Apply template change after (potential) rename so we write into the new dir.
 		if tplChanged {
 			writeName := newName
 			if !nameChanged {
@@ -142,9 +110,7 @@ func executeEdit(a *app, oldName, newName, newDir, newTemplate string) error {
 			}
 		}
 
-		// Update the registry entry. Since Project.Name is part of
-		// the key, a rename is Remove+Add; a same-name update goes
-		// through Registry.Update.
+		// Update the registry: rename is Remove+Add; same-name update goes through Update.
 		updated := current
 		updated.Name = newName
 		updated.Dir = absDir

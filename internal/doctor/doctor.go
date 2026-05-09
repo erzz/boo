@@ -1,9 +1,5 @@
 // Package doctor runs environment sanity checks for boo.
-//
-// Checks are evaluated in order. Some checks short-circuit later ones (e.g.
-// if Ghostty is not installed there is no point probing it). Each check
-// returns a Result; the worst Status across all checks becomes the overall
-// outcome.
+// Checks run in order; later checks may short-circuit based on earlier results.
 package doctor
 
 import (
@@ -51,15 +47,11 @@ type Result struct {
 	Hint   string
 }
 
-// supportedGhosttyMin is the minimum Ghostty version boo has been validated
-// against. Older versions may work but the JXA API surface boo relies on
-// first stabilized in 1.3.x.
+// supportedGhosttyMin is the minimum Ghostty version boo has been validated against.
 const supportedGhosttyMin = "1.3.1"
 
-// unsupportedGhosttyFrom is the exclusive upper bound on the supported
-// range. Ghostty is pre-2.0 and its AppleScript surface may shift in
-// non-backwards-compatible ways at the 2.0 boundary, so versions at or
-// above this floor produce a WARN until boo has been re-validated.
+// unsupportedGhosttyFrom is the exclusive upper bound. Ghostty is pre-2.0 and its
+// AppleScript surface may shift at the 2.0 boundary; versions at or above produce WARN.
 const unsupportedGhosttyFrom = "2.0.0"
 
 // CheckFunc takes the running set of results so far and returns the next
@@ -79,17 +71,9 @@ func AllChecks(client *ghostty.Client) []CheckFunc {
 	}
 }
 
-// ConfigCheck returns a check that loads the user config at path and
-// reports whether it parses cleanly.
-//
-//   - File missing → SKIP ("using factory defaults").
-//   - File parses → OK.
-//   - File present but malformed → FAIL with the parse error and a
-//     pointer to `boo config edit` for the obvious next step.
-//
-// Wired separately from AllChecks because the doctor package shouldn't
-// depend on internal/config (it's a leaf package); the CLI assembles
-// the loader and passes a CheckFunc in.
+// ConfigCheck returns a check that loads the config at path and reports parse
+// status. Missing file → SKIP; parses OK → OK; present but malformed → FAIL.
+// Wired separately from AllChecks to avoid a doctor→internal/config dependency.
 func ConfigCheck(path string, load func(path string) error) CheckFunc {
 	return func(_ context.Context, _ []Result) Result {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -112,18 +96,9 @@ func ConfigCheck(path string, load func(path string) error) CheckFunc {
 	}
 }
 
-// ThemesCheck reports whether each user theme in themesDir parses
-// cleanly. Themes are cosmetic, so broken themes are WARN rather than
-// FAIL — boo still launches, falling back to the default theme.
-//
-// Like ConfigCheck, this is wired separately so the doctor package
-// stays free of an internal/theme dependency. The CLI passes in a
-// list-and-validate function.
-//
-//   - themesDir doesn't exist → SKIP ("no user themes").
-//   - All user themes parse → OK.
-//   - One or more themes fail to parse → WARN with the first error
-//     surfaced; `boo themes` shows the full list inline with [error].
+// ThemesCheck reports whether each user theme in themesDir parses cleanly.
+// Broken themes are WARN (not FAIL) — boo still launches with the default theme.
+// Wired separately from AllChecks to avoid a doctor→internal/theme dependency.
 func ThemesCheck(themesDir string, validate func(dir string) (broken []string, err error)) CheckFunc {
 	return func(_ context.Context, _ []Result) Result {
 		if _, err := os.Stat(themesDir); os.IsNotExist(err) {
@@ -201,8 +176,7 @@ func checkGhosttyInstalled(_ context.Context, _ []Result) Result {
 	}
 }
 
-// previousFailed returns true if any prior check named with one of the given
-// names produced a Fail result. Used to short-circuit dependent checks.
+// previousFailed returns true if any prior check with one of the given names produced Fail.
 func previousFailed(prior []Result, names ...string) bool {
 	for _, r := range prior {
 		if r.Status != Fail {
@@ -218,8 +192,7 @@ func previousFailed(prior []Result, names ...string) bool {
 }
 
 // previousResult returns the result for a named prior check, if any.
-func previousResult(prior []Result, name string) (Result, bool) {
-	for _, r := range prior {
+func previousResult(prior []Result, name string) (Result, bool) {	for _, r := range prior {
 		if r.Name == name {
 			return r, true
 		}
@@ -279,8 +252,7 @@ func ghosttyVersionRangeCheck(client *ghostty.Client) CheckFunc {
 	}
 }
 
-// checkVersionRange compares ver against the supported range and returns the
-// appropriate Result.  Extracted so it can be unit-tested without a live Ghostty.
+// checkVersionRange compares ver against the supported range. Extracted for unit testing.
 func checkVersionRange(ver string) Result {
 	if ver == "" {
 		return Result{
@@ -314,9 +286,8 @@ func checkVersionRange(ver string) Result {
 	}
 }
 
-// compareVersions compares two dotted-decimal version strings (e.g. "1.3.0").
-// Returns -1 if a < b, 0 if a == b, 1 if a > b.  Non-numeric segments parse
-// as 0 rather than erroring, so "1.3.0-rc1" sorts between "1.2.x" and "1.3.0".
+// compareVersions compares dotted-decimal version strings. Returns -1, 0, or 1.
+// Non-numeric segments parse as 0, so "1.3.0-rc1" sorts between "1.2.x" and "1.3.0".
 func compareVersions(a, b string) int {
 	partsA := strings.Split(a, ".")
 	partsB := strings.Split(b, ".")
@@ -348,9 +319,8 @@ func ghosttyAutomationCheck(client *ghostty.Client) CheckFunc {
 		if !ok || runR.Status != OK {
 			return Result{Name: "automation permission", Status: Skip, Detail: "skipped (Ghostty not responsive)"}
 		}
-		// Probe a write action by counting windows. The 'count' standard command
-		// requires the same Automation permission as creating windows but doesn't
-		// open any UI. If permission is denied we get a -1743 error.
+		// Probe a write action by counting windows — requires the same Automation
+		// permission as creating windows but opens no UI. Permission denied → -1743.
 		err := client.ProbeAutomation(ctx)
 		if err == nil {
 			return Result{Name: "automation permission", Status: OK, Detail: "granted"}
@@ -374,14 +344,12 @@ func ghosttyAutomationCheck(client *ghostty.Client) CheckFunc {
 }
 
 func isGhosttyNotRunning(msg string) bool {
-	// JXA returns "Application can't be found" when Ghostty isn't running and
-	// AppleScript can't even resolve the bundle. Other shapes: "isn't running".
+	// JXA: "Application can't be found" or "isn't running" when Ghostty is absent.
 	return strings.Contains(msg, "isn't running") ||
 		strings.Contains(msg, "Application can't be found")
 }
 
-// checkFzfOptional reports whether fzf is available. fzf is optional —
-// boo works fine without it — so a missing fzf is Skip, not Warn.
+// checkFzfOptional reports whether fzf is available. Missing fzf is Skip, not Warn.
 func checkFzfOptional(_ context.Context, _ []Result) Result {
 	if path, err := exec.LookPath("fzf"); err == nil {
 		return Result{Name: "fzf (optional)", Status: OK, Detail: path}
@@ -395,8 +363,7 @@ func checkFzfOptional(_ context.Context, _ []Result) Result {
 }
 
 func isAutomationDenied(msg string) bool {
-	// macOS Automation denial surfaces as error -1743 ("Not authorized to send
-	// Apple events to ...") or text containing "Not authorised" / "Not authorized".
+	// macOS Automation denial: error -1743 or "Not authorised"/"Not authorized".
 	return strings.Contains(msg, "-1743") ||
 		strings.Contains(strings.ToLower(msg), "not authorised") ||
 		strings.Contains(strings.ToLower(msg), "not authorized")

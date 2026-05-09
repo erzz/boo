@@ -16,21 +16,7 @@ import (
 )
 
 // newThemesCmd implements `boo themes` and its subcommands.
-//
-// Mirrors the shape of `boo config` and `boo layouts`: a parent command
-// with show/path/init subcommands. The bare `boo themes` is an alias
-// for `boo themes list`, the same way `boo config` is an alias for
-// `boo config show`.
-//
-// Themes are cosmetic and discovery-driven. The user model is:
-//
-//   - Run `boo themes` to see what's available (built-in + user).
-//   - Pick one in `~/.config/boo/config.yaml` via `ui.theme: <name>`.
-//   - To customise: `boo themes init <name>` writes a starter file
-//     to ~/.config/boo/themes/<name>.yaml that the user edits.
-//
-// We deliberately don't auto-seed any files on first run. Users explicitly
-// opt in with `themes init` when they want to customise.
+// Bare `boo themes` is an alias for `boo themes list`.
 func newThemesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "themes",
@@ -151,9 +137,8 @@ Refuses to overwrite an existing file unless --force is given.`,
 	return cmd
 }
 
-// themesJSONEntry mirrors layoutsJSONEntry for symmetry with `boo
-// layouts --json`. Tools can detect a non-empty Error field and flag
-// the theme rather than silently dropping it from the listing.
+// themesJSONEntry is a per-theme record for `boo themes list --json`.
+// A non-empty Error field signals a broken theme (same info as the human listing's [error]).
 type themesJSONEntry struct {
 	Name        string `json:"name"`
 	Source      string `json:"source,omitempty"`
@@ -169,8 +154,7 @@ func runThemesList(a *app, out io.Writer, asJSON bool) error {
 		return fmt.Errorf("list themes: %w", err)
 	}
 	if len(names) == 0 {
-		// Defensive: built-ins are embedded so this should never
-		// happen. If it does, the binary is corrupt.
+		// Defensive: built-ins are embedded; if this fires the binary is corrupt.
 		return fmt.Errorf("no themes available (built-ins missing from binary?)")
 	}
 	sort.Strings(names)
@@ -211,9 +195,7 @@ func runThemesList(a *app, out io.Writer, asJSON bool) error {
 	return nil
 }
 
-// writeThemeEntry writes one theme's listing entry. The format mirrors
-// `boo layouts` (name + tag + path + description + body) but the body
-// is a colour swatch rather than an ASCII layout preview.
+// writeThemeEntry writes one theme's listing entry: name, tag, path, description, and colour swatch.
 func writeThemeEntry(w io.Writer, r theme.Resolved, active bool) {
 	source := "[built-in]"
 	if r.Source == theme.SourceUser {
@@ -242,11 +224,8 @@ func writeThemeEntry(w io.Writer, r theme.Resolved, active bool) {
 	}
 	_, _ = fmt.Fprintln(w)
 
-	// Coloured swatch. Each slot renders as a small filled block in
-	// the slot's actual colour, followed by the colour value as text
-	// for copy-paste. We render lipgloss colours here only on the
-	// human listing branch — the JSON branch above stays plain so
-	// downstream tools see clean values without ANSI noise.
+	// Colour swatch: filled block in the slot's actual colour, followed by the hex value.
+	// JSON branch renders plain values without ANSI noise.
 	for _, slot := range []struct {
 		name, val string
 	}{
@@ -262,9 +241,7 @@ func writeThemeEntry(w io.Writer, r theme.Resolved, active bool) {
 	}
 }
 
-// renderSwatch returns a small filled block coloured to match value.
-// Empty value yields whitespace of the same width so swatches stay
-// column-aligned regardless of which slots a theme overrides.
+// renderSwatch returns a coloured filled block for value, or equal-width whitespace when empty.
 func renderSwatch(value string) string {
 	const block = "███"
 	if value == "" {
@@ -274,8 +251,7 @@ func renderSwatch(value string) string {
 }
 
 func runThemesShow(a *app, out io.Writer, name string) error {
-	// Prefer user theme if present — `show` should reflect what the
-	// user would see, not the built-in version they may have shadowed.
+	// Prefer user theme — `show` should reflect what the user sees, not the shadowed built-in.
 	if a.Paths.ThemesDir != "" {
 		path := filepath.Join(a.Paths.ThemesDir, name+".yaml")
 		if data, err := os.ReadFile(path); err == nil {
@@ -316,11 +292,8 @@ func runThemesInit(a *app, out io.Writer, name, seed string, force bool) error {
 	if err != nil {
 		return fmt.Errorf("seed theme %q not found", seed)
 	}
-	// Rewrite the seed's `name:` line to match the file we're
-	// writing. Without this, every starter file ships with
-	// `name: default` which makes `boo themes` list it twice
-	// — once as the built-in, once as a user override that
-	// happens to point at the same name.
+	// Rewrite seed's `name:` line to match the new file — otherwise every starter ships
+	// as `name: default` and `boo themes` lists it twice.
 	data = retargetThemeName(data, name)
 	if err := os.MkdirAll(a.Paths.ThemesDir, 0o755); err != nil {
 		return fmt.Errorf("create themes dir: %w", err)
@@ -333,18 +306,13 @@ func runThemesInit(a *app, out io.Writer, name, seed string, force bool) error {
 	return nil
 }
 
-// retargetThemeName rewrites a single top-level `name:` line in YAML
-// bytes to a new value. We do this with a line-level scan rather than
-// YAML round-trip so the seeded file preserves the source comments
-// (which carry the schema reference for users editing the file).
-//
-// If no top-level `name:` line is present, the bytes are returned
-// unchanged — Resolve will fill in the filename stem.
+// retargetThemeName rewrites the top-level `name:` line in YAML bytes to newName.
+// Uses line scanning (not YAML round-trip) to preserve source comments in the seeded file.
+// Returns bytes unchanged if no top-level `name:` line is present.
 func retargetThemeName(data []byte, newName string) []byte {
 	lines := strings.Split(string(data), "\n")
 	for i, line := range lines {
-		// Match exactly `name: ...` at column 0 — skip indented
-		// `name:` fields under nested keys.
+		// Match `name:` at column 0 only — skip indented `name:` fields under nested keys.
 		if strings.HasPrefix(line, "name:") {
 			lines[i] = "name: " + newName
 			break

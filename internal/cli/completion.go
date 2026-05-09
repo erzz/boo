@@ -6,19 +6,9 @@ import (
 	"github.com/erzz/boo/internal/state"
 )
 
-// projectNamesForCompletion returns registered project names suitable
-// for cobra ValidArgsFunction completion.
-//
-// All errors are swallowed: completion runs in the user's shell on
-// every TAB. A noisy error (or a non-zero exit) would break the shell
-// prompt or pollute the candidate list. Returning nil silently makes
-// the shell fall back to no completions, which is the right
-// degradation.
-//
-// Note: we deliberately don't go through newApp() here. newApp loads
-// config, which can FAIL on malformed YAML — and we don't want a
-// broken config to disable shell completion. We resolve paths
-// directly via state.Default() and skip config entirely.
+// projectNamesForCompletion returns registered project names for cobra tab-completion.
+// All errors are swallowed silently — a noisy error on TAB would break the shell prompt.
+// Skips newApp() so a malformed config doesn't disable completion.
 func projectNamesForCompletion() []string {
 	paths, err := state.Default()
 	if err != nil {
@@ -35,9 +25,8 @@ func projectNamesForCompletion() []string {
 	return out
 }
 
-// templateNamesForCompletion returns layout template names (built-in +
-// user) suitable for cobra ValidArgsFunction completion. Same
-// silent-on-error contract as projectNamesForCompletion.
+// templateNamesForCompletion returns layout template names for cobra tab-completion.
+// Same silent-on-error contract as projectNamesForCompletion.
 func templateNamesForCompletion() []string {
 	paths, err := state.Default()
 	if err != nil {

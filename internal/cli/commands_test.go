@@ -18,14 +18,8 @@ import (
 	"github.com/erzz/boo/internal/state"
 )
 
-// makeAppForCmds builds a minimal app suitable for testing commands
-// that touch the registry, layout files, and runtime state but do
-// NOT need a live Ghostty.
-//
-// Ghostty is wired to a fake exec.Runner that returns "no terminal"
-// for any osascript invocation — the only Ghostty method these tests
-// would hit is WindowExists, which short-circuits to "false" when no
-// project has ever been launched (no runtime state file).
+// makeAppForCmds builds a minimal app for tests touching registry/layout/state but not live Ghostty.
+// Ghostty is wired to a fake runner returning nil (WindowExists → false; no runtime state).
 func makeAppForCmds(t *testing.T) *app {
 	t.Helper()
 	dir := t.TempDir()
@@ -34,9 +28,7 @@ func makeAppForCmds(t *testing.T) *app {
 		t.Fatalf("EnsureDirs: %v", err)
 	}
 	fake := booexec.NewFake(func(_ string, _ []string, _ []byte) ([]byte, []byte, error) {
-		// Default: pretend nothing is running. WindowExists in
-		// particular only ever sees this when a runtime state
-		// file claims a window — which our fixtures never set up.
+		// Default: pretend nothing is running.
 		return nil, nil, nil
 	})
 	return &app{
@@ -45,9 +37,7 @@ func makeAppForCmds(t *testing.T) *app {
 	}
 }
 
-// registerProjectForTest writes a project entry + a layout file
-// directly, bypassing runCreateProject (which would auto-launch
-// Ghostty). Returns the project name.
+// registerProjectForTest writes a project entry + layout file directly (bypasses runCreateProject / Ghostty).
 func registerProjectForTest(t *testing.T, a *app, name, dir, templateName string) {
 	t.Helper()
 	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, templateName)
@@ -85,11 +75,7 @@ func TestSetLayout_RewritesLayoutFileAndUpdatesRegistry(t *testing.T) {
 	dir := t.TempDir()
 	registerProjectForTest(t, a, "proj", dir, "1x1x1")
 
-	// Inline the set-layout flow. Ideally we'd call the cobra command;
-	// but newApp() reads BOO_HOME, which conflicts with t.TempDir-based
-	// isolation we already have via state.ForRoot. The flow is small
-	// enough that re-running it in the test still meaningfully exercises
-	// the contract (registry.Update + project.SaveLayout in lockstep).
+	// Inline the set-layout flow — newApp() reads BOO_HOME which conflicts with ForRoot isolation.
 	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, "triple")
 	if err != nil {
 		t.Fatalf("resolve triple: %v", err)
@@ -139,9 +125,8 @@ func TestSetLayout_RewritesLayoutFileAndUpdatesRegistry(t *testing.T) {
 	}
 }
 
-// Registry.Update returns ErrNotFound for an unknown project. The
-// set-layout command relies on this to fail fast rather than silently
-// adding a new project entry.
+// TestRegistryUpdate_UnknownProjectIsErrNotFound: Registry.Update returns ErrNotFound for unknown projects
+// (set-layout relies on this to fail fast rather than silently add a new entry).
 func TestRegistryUpdate_UnknownProjectIsErrNotFound(t *testing.T) {
 	a := makeAppForCmds(t)
 	reg, err := project.Load(a.Paths)
@@ -154,18 +139,14 @@ func TestRegistryUpdate_UnknownProjectIsErrNotFound(t *testing.T) {
 	}
 }
 
-// loadOrRegenerateLayout regenerates the snapshot from the registry's
-// template name when the on-disk file is missing. This handles old
-// pre-YAML installs whose stale .toml snapshots got cleaned up, and
-// anyone who blew away ~/.config/boo by accident.
+// TestLoadOrRegenerateLayout_RecreatesMissingSnapshot: regenerates snapshot from template when file is missing.
+// Handles pre-YAML installs with deleted .toml snapshots or accidental ~/.config/boo removal.
 func TestLoadOrRegenerateLayout_RecreatesMissingSnapshot(t *testing.T) {
 	a := makeAppForCmds(t)
 	dir := t.TempDir()
 	registerProjectForTest(t, a, "proj", dir, "triple")
 
-	// Remove the snapshot the helper just wrote — simulate the
-	// migration scenario where layout.toml got deleted and no
-	// layout.yaml ever existed.
+	// Remove the snapshot — simulate missing layout.yaml scenario.
 	snapPath := a.Paths.ProjectLayoutFile("proj")
 	if err := os.Remove(snapPath); err != nil {
 		t.Fatalf("remove snapshot: %v", err)
@@ -187,16 +168,14 @@ func TestLoadOrRegenerateLayout_RecreatesMissingSnapshot(t *testing.T) {
 	if l.Name != "triple" {
 		t.Errorf("regenerated Layout.Name = %q, want %q", l.Name, "triple")
 	}
-	// Snapshot should be on disk again so subsequent calls go through
-	// the fast path.
+	// Snapshot should be rewritten to disk for fast-path on subsequent calls.
 	if _, err := os.Stat(snapPath); err != nil {
 		t.Errorf("snapshot not rewritten: %v", err)
 	}
 }
 
-// Regeneration only kicks in for "file does not exist" — a present-but-
-// corrupt snapshot must surface as a hard error so users notice (vs.
-// silently overwriting their hand-edited layout).
+// TestLoadOrRegenerateLayout_CorruptSnapshotIsHardError: corrupt snapshot must be a hard error,
+// not silently overwritten (protects hand-edited layouts).
 func TestLoadOrRegenerateLayout_CorruptSnapshotIsHardError(t *testing.T) {
 	a := makeAppForCmds(t)
 	dir := t.TempDir()
@@ -222,8 +201,7 @@ func TestLoadOrRegenerateLayout_CorruptSnapshotIsHardError(t *testing.T) {
 	}
 }
 
-// G7: show — verify the layout file path the command points the user
-// at actually exists for a registered project.
+// TestShow_LayoutFilePathExistsForRegisteredProject: layout file path exists for a registered project.
 func TestShow_LayoutFilePathExistsForRegisteredProject(t *testing.T) {
 	a := makeAppForCmds(t)
 	dir := t.TempDir()
@@ -235,9 +213,7 @@ func TestShow_LayoutFilePathExistsForRegisteredProject(t *testing.T) {
 	}
 }
 
-// G5: list --json on an empty registry must emit `[]`, not `null`.
-// JSON consumers that use jq (or strict-typed languages) treat the two
-// very differently.
+// TestRenderListJSON_EmptyRegistryEmitsArray: empty registry must emit `[]`, not `null` (jq/strict-typed compat).
 func TestRenderListJSON_EmptyRegistryEmitsArray(t *testing.T) {
 	a := makeAppForCmds(t)
 	var buf bytes.Buffer
@@ -250,8 +226,7 @@ func TestRenderListJSON_EmptyRegistryEmitsArray(t *testing.T) {
 	}
 }
 
-// G5: list --json populated case — round-trip through json.Unmarshal
-// to verify the schema matches what we documented.
+// TestRenderListJSON_PopulatedRegistryHasExpectedFields: round-trip through json.Unmarshal to verify schema.
 func TestRenderListJSON_PopulatedRegistryHasExpectedFields(t *testing.T) {
 	a := makeAppForCmds(t)
 	dir := t.TempDir()
@@ -277,9 +252,7 @@ func TestRenderListJSON_PopulatedRegistryHasExpectedFields(t *testing.T) {
 	}
 }
 
-// G5: layouts --json must list every built-in with source set to
-// "builtin" or "user" (not the empty string, not the internal
-// SourceUser/SourceBuiltin constants).
+// TestRunLayoutsJSON_ListsBuiltinsWithSourceTag: layouts --json lists every built-in with source "builtin" or "user".
 func TestRunLayoutsJSON_ListsBuiltinsWithSourceTag(t *testing.T) {
 	a := makeAppForCmds(t)
 	var buf bytes.Buffer
@@ -307,8 +280,7 @@ func TestRunLayoutsJSON_ListsBuiltinsWithSourceTag(t *testing.T) {
 	}
 }
 
-// G6: shell completion — projectNamesForCompletion must be silent on
-// errors, which means: missing BOO_HOME root → nil, not panic.
+// TestProjectNamesForCompletion_SilentOnNoState: missing BOO_HOME root → nil, not panic.
 func TestProjectNamesForCompletion_SilentOnNoState(t *testing.T) {
 	t.Setenv("BOO_HOME", t.TempDir())
 	got := projectNamesForCompletion()
@@ -317,8 +289,7 @@ func TestProjectNamesForCompletion_SilentOnNoState(t *testing.T) {
 	}
 }
 
-// G6: completion picks up registered project names. We use BOO_HOME to
-// point the helper at our temp state.
+// TestProjectNamesForCompletion_ReturnsRegisteredNames: completion returns registered project names via BOO_HOME.
 func TestProjectNamesForCompletion_ReturnsRegisteredNames(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("BOO_HOME", root)
@@ -346,8 +317,7 @@ func TestProjectNamesForCompletion_ReturnsRegisteredNames(t *testing.T) {
 	}
 }
 
-// G6: completion templates resolves built-ins via state.ForRoot's
-// LayoutsDir even when no user templates are present.
+// TestTemplateNamesForCompletion_ReturnsBuiltins: completion returns built-in template names.
 func TestTemplateNamesForCompletion_ReturnsBuiltins(t *testing.T) {
 	t.Setenv("BOO_HOME", t.TempDir())
 	got := templateNamesForCompletion()
@@ -356,10 +326,8 @@ func TestTemplateNamesForCompletion_ReturnsBuiltins(t *testing.T) {
 	}
 }
 
-// G6: a malformed config file MUST NOT break shell completion. The
-// whole point of the helper bypassing newApp() is so a user with a
-// busted YAML file can still TAB-complete project names while they
-// fix it.
+// TestProjectNamesForCompletion_StillWorksWithMalformedConfig: malformed config must not break completion.
+// The helper bypasses newApp() so users can TAB-complete while fixing broken YAML.
 func TestProjectNamesForCompletion_StillWorksWithMalformedConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("BOO_HOME", root)
@@ -385,10 +353,8 @@ func TestProjectNamesForCompletion_StillWorksWithMalformedConfig(t *testing.T) {
 	}
 }
 
-// G5 black-box: list --json schema verified WITHOUT round-tripping
-// through the same internal struct (which would mask tag/shape
-// regressions). Decode into map[string]any and assert the wire-level
-// keys/types directly.
+// TestListJSON_BlackBoxSchema: list --json schema verified via map[string]any (not internal struct)
+// to catch tag/shape regressions that round-tripping through the same struct would mask.
 func TestListJSON_BlackBoxSchema(t *testing.T) {
 	a := makeAppForCmds(t)
 	dir := t.TempDir()
@@ -419,7 +385,7 @@ func TestListJSON_BlackBoxSchema(t *testing.T) {
 	}
 }
 
-// G5 black-box: layouts --json schema.
+// TestLayoutsJSON_BlackBoxSchema: layouts --json schema via map[string]any.
 func TestLayoutsJSON_BlackBoxSchema(t *testing.T) {
 	a := makeAppForCmds(t)
 	var buf bytes.Buffer
@@ -446,8 +412,7 @@ func TestLayoutsJSON_BlackBoxSchema(t *testing.T) {
 	}
 }
 
-// G5: a broken user template MUST appear in --json output with a
-// non-empty `error` field, NOT silently disappear.
+// TestLayoutsJSON_BrokenUserTemplateHasErrorField: broken user template must appear with non-empty `error` field.
 func TestLayoutsJSON_BrokenUserTemplateHasErrorField(t *testing.T) {
 	a := makeAppForCmds(t)
 	if err := os.WriteFile(filepath.Join(a.Paths.LayoutsDir, "broken.yaml"),
@@ -477,8 +442,7 @@ func TestLayoutsJSON_BrokenUserTemplateHasErrorField(t *testing.T) {
 	}
 }
 
-// G5: config show --json schema. Verifies the dotted-key flattening
-// and the {value, source} pair shape.
+// TestConfigShowJSON_BlackBoxSchema: config show --json dotted-key schema and {value, source} pair shape.
 func TestConfigShowJSON_BlackBoxSchema(t *testing.T) {
 	t.Setenv("BOO_HOME", t.TempDir())
 	var buf bytes.Buffer
@@ -509,9 +473,7 @@ func TestConfigShowJSON_BlackBoxSchema(t *testing.T) {
 			t.Errorf("values[%q] missing 'source'", k)
 		}
 	}
-	// default_layout's factory default is "triple"; this is the
-	// canonical user-visible default and changing it is a UX
-	// commitment.
+	// default_layout factory default is "triple" — changing it is a UX commitment.
 	dl := values["default_layout"].(map[string]any)
 	if dl["value"] != "triple" {
 		t.Errorf("factory default_layout = %v, want \"triple\"", dl["value"])
@@ -529,10 +491,8 @@ func mapKeys(m map[string]any) []string {
 	return keys
 }
 
-// TestProjectPreviewer_UsesSavedLayoutOverTemplate verifies that the right-pane
-// project preview renders the on-disk saved layout snapshot rather than
-// resolving the template name from the registry.  This ensures that manual
-// edits via `boo edit` / `boo save` are reflected in the picker immediately.
+// TestProjectPreviewer_UsesSavedLayoutOverTemplate: previewer renders the on-disk snapshot,
+// not the template — so hand-edits via `boo edit` / `boo save` are reflected in the picker immediately.
 func TestProjectPreviewer_UsesSavedLayoutOverTemplate(t *testing.T) {
 	a := makeAppForCmds(t)
 	dir := t.TempDir()
@@ -540,8 +500,7 @@ func TestProjectPreviewer_UsesSavedLayoutOverTemplate(t *testing.T) {
 	// Register with template "triple" (3-pane layout).
 	registerProjectForTest(t, a, "proj", dir, "triple")
 
-	// Overwrite the saved snapshot with a single-pane layout — deliberately
-	// different from the "triple" template so we can tell which was rendered.
+	// Overwrite saved snapshot with a single-pane layout — deliberately different from "triple".
 	singlePane := layout.Layout{
 		Name: "single",
 		Tabs: []layout.Tab{{

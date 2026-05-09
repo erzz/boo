@@ -1,15 +1,6 @@
-// Package config loads boo's global user configuration.
-//
-// The config file lives at ~/.config/boo/config.yaml (or wherever
-// state.Paths points). It is OPTIONAL: a missing file is not an error;
-// boo runs entirely on factory defaults. A present file's values
-// override the corresponding factory defaults; unset keys keep their
-// factory values (no merge surprises).
-//
-// We deliberately do NOT support env-var or per-project overrides at
-// this layer. Per-project layout customisation lives in the project's
-// own layout.yaml; env vars would create a third precedence layer that
-// nobody asks for and everybody trips over.
+// Package config loads boo's global user configuration from ~/.config/boo/config.yaml.
+// A missing file is not an error; boo runs on factory defaults. A malformed file IS an
+// error — silent fallback would mask user mistakes.
 package config
 
 import (
@@ -21,21 +12,15 @@ import (
 
 // Config is boo's effective global config.
 //
-// Add new keys here. Factory defaults live in DefaultConfig() — never
-// rely on Go's zero values for "default", because then we can't tell
-// "user explicitly set this to empty/zero" from "user said nothing".
-// All optional fields are pointers so an absent key in YAML is
-// distinguishable from a present-but-empty value.
+// All optional fields are pointers so an absent YAML key ("user said nothing")
+// is distinguishable from a present-but-zero value ("user set empty"). Factory
+// defaults live in DefaultConfig() — never rely on Go zero values for defaults.
 type Config struct {
-	// DefaultLayout is the layout template name used when --layout is
-	// omitted on `boo new` and the new-project form is opened without
-	// a preselection. Factory default: "triple".
+	// DefaultLayout is the template used when --layout is omitted. Factory default: "triple".
 	DefaultLayout *string `json:"default_layout,omitempty" yaml:"default_layout,omitempty"`
 
-	// ProjectsDir is the parent directory `boo new --from <url>` clones
-	// into when --into isn't given. Tilde expansion is applied at read
-	// time. Factory default: "" (clone destination derived relative to
-	// the current working directory, matching pre-config behaviour).
+	// ProjectsDir is where `boo new --from <url>` clones when --into isn't given.
+	// Tilde-expanded at load time. Factory default: "" (derive from cwd).
 	ProjectsDir *string `json:"projects_dir,omitempty" yaml:"projects_dir,omitempty"`
 
 	// Git holds git-related preferences.
@@ -47,25 +32,19 @@ type Config struct {
 
 // GitConfig groups git-related preferences.
 type GitConfig struct {
-	// DefaultRemote, if set, pre-fills the new-project form's "Clone
-	// from URL" field. Typing a bare repo name in that field expands
-	// to "<DefaultRemote>/<name>". Empty = no prefill, no expansion.
+	// DefaultRemote pre-fills the new-project form's URL field; a bare repo name
+	// expands to "<DefaultRemote>/<name>". Empty = no prefill.
 	DefaultRemote *string `json:"default_remote,omitempty" yaml:"default_remote,omitempty"`
 }
 
 // UIConfig groups TUI/CLI presentation preferences.
-//
-// Reserved-only for now. Theme has no behaviour wired up yet; it's
-// here so the schema is forward-stable when we add theming.
 type UIConfig struct {
-	// Theme selects a named theme. Factory default: "default". No
-	// behaviour is wired yet — this is a placeholder so users can
-	// start adding the key without it breaking on parse.
+	// Theme selects a named theme. Factory default: "default".
 	Theme *string `json:"theme,omitempty" yaml:"theme,omitempty"`
 }
 
-// DefaultConfig returns the factory defaults. Every field that has a
-// non-empty default value MUST set it here, not rely on Go zero values.
+// DefaultConfig returns factory defaults. Every field with a non-zero default
+// MUST be set here; don't rely on Go zero values (see Config doc).
 func DefaultConfig() Config {
 	dl := "triple"
 	theme := "default"
@@ -75,16 +54,9 @@ func DefaultConfig() Config {
 	}
 }
 
-// Load reads the config file at path, merges it onto factory defaults,
-// and returns the effective config plus a Sources map describing where
-// each value came from (factory vs file). Sources is intended for
-// `boo config show` so users can debug which value is winning.
-//
-// A missing file is not an error: defaults are returned with every
-// source = "factory".
-//
-// A malformed file IS an error: silently falling back to defaults
-// would mask user mistakes (typos in YAML keys, wrong types).
+// Load reads the config file at path, merges onto factory defaults, and returns
+// the effective config plus a Sources map. A missing file returns defaults with
+// every source = "factory". A malformed file returns an error.
 func Load(path string) (Config, Sources, error) {
 	cfg := DefaultConfig()
 	src := newSources("factory")
@@ -106,9 +78,8 @@ func Load(path string) (Config, Sources, error) {
 	return cfg, src, nil
 }
 
-// Sources records the origin of each config value. Keys are dotted
-// field paths (e.g. "default_layout", "git.default_remote"). Values
-// are either "factory" or the absolute path of the config file.
+// Sources records the origin of each config value. Keys are dotted field paths
+// (e.g. "default_layout"); values are "factory" or the config file path.
 type Sources map[string]string
 
 func newSources(origin string) Sources {
@@ -120,8 +91,7 @@ func newSources(origin string) Sources {
 	}
 }
 
-// merge applies non-nil fields from src on top of dst, recording the
-// origin in srcs for every field that was overridden.
+// merge applies non-nil fields from src onto dst, recording each override in srcs.
 func merge(dst, src *Config, srcs Sources, origin string) {
 	if src.DefaultLayout != nil {
 		dst.DefaultLayout = src.DefaultLayout
@@ -142,11 +112,8 @@ func merge(dst, src *Config, srcs Sources, origin string) {
 	}
 }
 
-// expandTilde replaces a leading "~" with $HOME. Done at load time so
-// downstream consumers can treat the value as a plain absolute path.
-// If $HOME can't be resolved, the path is returned unchanged — the
-// caller will get a clearer error from whatever filesystem op fails
-// than we could produce here.
+// expandTilde replaces a leading "~" with $HOME. If $HOME can't be resolved
+// the path is returned unchanged (the caller will see a clearer fs error).
 func expandTilde(p string) string {
 	if p == "" || p[0] != '~' {
 		return p
@@ -163,9 +130,6 @@ func expandTilde(p string) string {
 	}
 	return p
 }
-
-// Convenience getters that dereference pointers safely. Callers can
-// use these instead of nil-checking every field.
 
 // DefaultLayoutOr returns the configured DefaultLayout or fallback if unset.
 func (c Config) DefaultLayoutOr(fallback string) string {

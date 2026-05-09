@@ -6,24 +6,11 @@ import (
 	"github.com/erzz/boo/internal/layout"
 )
 
-// SaveOutcome categorises the result of comparing the previously-saved
-// layout against the layout we just captured from Ghostty.
-//
-//   - OutcomeSilent: nothing meaningful changed; the user should see only
-//     the standard "Saved layout for X." line. No prompt, no warnings.
-//
-//   - OutcomeStructural: the shape changed (tabs added/removed, leaf
-//     count changed, or tree shape couldn't be preserved) but no
-//     unrecoverable data was lost. Show a focused before/after diff and
-//     ask for confirmation (skipped under --force).
-//
-//   - OutcomeLossy: the previous layout contained data that Ghostty's
-//     AppleScript dictionary doesn't expose (command, env vars,
-//     initial input, or leaves dropped because the captured pane count
-//     shrank). That data WILL be wiped by this save. Show the diff with
-//     explicit lossy markers and require confirmation; --force skips
-//     the prompt but still prints the diff to stderr so audit logs
-//     show what was lost.
+// SaveOutcome categorises the result of comparing prev vs captured layouts.
+//   - OutcomeSilent: nothing changed; no prompt, no output.
+//   - OutcomeStructural: shape changed but no unrecoverable data lost; show diff, ask to confirm.
+//   - OutcomeLossy: data invisible to Ghostty's API (command/env/initial_input) WILL be wiped;
+//     show diff with markers, require confirmation; --force skips prompt but still logs to stderr.
 type SaveOutcome int
 
 const (
@@ -33,27 +20,17 @@ const (
 )
 
 // SaveDiff is the result of comparing previous and next layouts.
-//
-// ChangedTabs lists only tabs that differ structurally OR contain lossy
-// leaves; identical tabs are not included. LossReasons is a short
-// human-readable summary of WHY the save is lossy ("tab 0 leaf 1: command
-// 'go test' will be lost"); empty for silent and structural outcomes.
+// ChangedTabs lists only tabs that differ or contain lossy leaves; LossReasons
+// summarises why the save is lossy (empty for silent/structural outcomes).
 type SaveDiff struct {
 	Outcome     SaveOutcome
 	ChangedTabs []TabDiff
 	LossReasons []string
 }
 
-// TabDiff is one tab's worth of change information.
-//
-// Index/Name identify the tab in the captured layout (Next).
-// Prev is nil when the tab is being added; Next is nil when it's removed.
-//
-// LossyLeaves holds 0-based leaf indices (in left-to-right depth-first
-// order) within Prev where unrecoverable information lived that the
-// merged Next did not preserve. Empty for tabs that are merely
-// structurally different. The renderer uses these to mark the
-// corresponding cells in the before-side of the diff.
+// TabDiff is one tab's change. Prev is nil for added tabs; Next is nil for removed.
+// LossyLeaves holds 0-based leaf indices (DFS left-to-right) where prev had
+// unrecoverable data that the merged Next did not preserve.
 type TabDiff struct {
 	Index       int
 	Name        string
@@ -62,17 +39,9 @@ type TabDiff struct {
 	LossyLeaves []int
 }
 
-// diffForSave computes a SaveDiff between the previously-saved layout and
-// the about-to-be-written merged one.
-//
-// A zero-value `prev` (no Tabs) is treated as "no previous layout" and the
-// outcome is always OutcomeSilent — the first save of a project has nothing
-// to lose. Callers should pass layout.Layout{} when the on-disk file is
-// missing or fails to parse rather than propagating that error.
-//
-// "Next" here is the post-merge layout we're about to write. The merge
-// has already done its best to carry forward invisible fields; this diff
-// reports what survived and what didn't.
+// diffForSave computes a SaveDiff between the previously-saved layout and the
+// about-to-be-written merged layout. A zero-value prev (no Tabs) → OutcomeSilent
+// (first save; nothing to lose). "Next" is the post-merge layout to be written.
 func diffForSave(prev, next layout.Layout) SaveDiff {
 	if len(prev.Tabs) == 0 {
 		return SaveDiff{Outcome: OutcomeSilent}
@@ -101,8 +70,7 @@ func diffForSave(prev, next layout.Layout) SaveDiff {
 			nTab = &t
 		}
 
-		// Structural changes: tab added, tab removed, leaf count
-		// changed, or tree shape couldn't be preserved.
+		// Structural changes: tab added/removed, leaf count changed, or tree shape changed.
 		structural := false
 		var prevLeaves, nextLeaves []layout.Split
 		switch {
@@ -116,24 +84,12 @@ func diffForSave(prev, next layout.Layout) SaveDiff {
 			if len(prevLeaves) != len(nextLeaves) {
 				structural = true
 			} else if !sameTreeShape(pTab.Root, nTab.Root) {
-				// Same leaf count but different nesting — happens
-				// when the merge had to flatten a previously-nested
-				// tree because the captured leaf count didn't fit.
+				// Same leaf count but different nesting.
 				structural = true
 			}
 		}
 
-		// Lossy leaves: walk prev's leaves left-to-right and check
-		// whether the merged result preserved each one's invisible
-		// fields. Two cases:
-		//   1. Leaf has a counterpart in next at the same leaf index
-		//      and next dropped a field → mark the leaf AND emit a
-		//      text reason (the user sees both).
-		//   2. Leaf has no counterpart (next has fewer leaves) → mark
-		//      it and emit a "dropped:" text reason via mergeForSave;
-		//      we only emit the cell marker here to avoid duplicating
-		//      the textual reason. (mergeForSave is the authority on
-		//      dropped-leaf reasons because it owns the alignment.)
+		// Lossy leaves: walk prev's leaves and check whether next preserved each invisible field.
 		var lossy []int
 		if pTab != nil {
 			for j, prevLeaf := range prevLeaves {
@@ -176,10 +132,8 @@ func diffForSave(prev, next layout.Layout) SaveDiff {
 	}
 }
 
-// collectLeaves returns a tab's leaves in left-to-right depth-first
-// order — the same order the JXA walker uses to materialise terminals,
-// and the same order Ghostty returns them in DescribeWindow. This is the
-// canonical "leaf index" used for diff alignment.
+// collectLeaves returns a split tree's leaves in left-to-right DFS order —
+// the same order JXA materialises terminals and Ghostty returns them in DescribeWindow.
 func collectLeaves(s layout.Split) []layout.Split {
 	if s.IsLeaf() {
 		return []layout.Split{s}
@@ -192,8 +146,7 @@ func collectLeaves(s layout.Split) []layout.Split {
 }
 
 // sameTreeShape reports whether two split trees have identical structure
-// (same direction at each interior node, same recursive shape). Leaf
-// content is ignored — this only compares nesting.
+// (same direction at each interior node). Leaf content is ignored.
 func sameTreeShape(a, b layout.Split) bool {
 	if a.IsLeaf() != b.IsLeaf() {
 		return false
@@ -212,17 +165,10 @@ func sameTreeShape(a, b layout.Split) bool {
 	return true
 }
 
-// leafLosesData reports whether a previously-saved leaf holds
-// unrecoverable data that the corresponding merged leaf fails to
-// preserve. nextLeaf may be nil when prev had a leaf at this index but
-// next doesn't (closed pane) — in that case every unrecoverable field
-// on prev is, by definition, lost.
-//
-// "Unrecoverable" means: invisible to Ghostty's AppleScript dictionary
-// (command, env, initial_input). Cwd is not in this set — capture sees
-// cwd correctly, so a cwd change is intentional, not loss. Direction
-// is no longer in this set either: it's a property of interior nodes,
-// and tree-shape loss is reported at the tab level via sameTreeShape.
+// leafLosesData reports whether a prev leaf holds unrecoverable data that the
+// merged next leaf fails to preserve. nextLeaf may be nil (closed pane) — then
+// every unrecoverable field on prev is lost. "Unrecoverable" = invisible to
+// Ghostty's AppleScript API: command, env, initial_input. Cwd is NOT in this set.
 func leafLosesData(prev layout.Split, next *layout.Split) bool {
 	if next == nil {
 		return leafHasInvisibleData(prev)
@@ -239,15 +185,12 @@ func leafLosesData(prev layout.Split, next *layout.Split) bool {
 	return false
 }
 
-// leafHasInvisibleData reports whether a leaf carries any field that
-// capture cannot recover — used to decide whether dropping a leaf
-// constitutes loss worth surfacing.
+// leafHasInvisibleData reports whether a leaf carries any field that capture cannot recover.
 func leafHasInvisibleData(s layout.Split) bool {
 	return s.Command != "" || s.InitialInput != "" || len(s.Env) > 0
 }
 
 // envEqual reports whether two env maps have identical key/value sets.
-// Order-insensitive by definition (maps don't have order).
 func envEqual(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false
@@ -260,17 +203,8 @@ func envEqual(a, b map[string]string) bool {
 	return true
 }
 
-// leafLossReasons returns one human-readable reason per unrecoverable
-// property on a previously-saved leaf. Returning a slice (rather than
-// the first reason) is deliberate — a single leaf can carry several
-// lossy fields at once, and the user deserves to see all of them
-// before approving the save.
-//
-// j is the leaf's depth-first index within its tab (matching the
-// LossyLeaves entries on TabDiff and the column index the renderer
-// uses to mark cells).
-//
-// An empty result means the leaf has no unrecoverable properties.
+// leafLossReasons returns one human-readable reason per unrecoverable property on a prev leaf.
+// j is the leaf's DFS index within its tab (matches LossyLeaves in TabDiff).
 func leafLossReasons(tabIdx int, tabName string, j int, s layout.Split) []string {
 	tag := fmt.Sprintf("tab %d", tabIdx)
 	if tabName != "" {

@@ -13,10 +13,7 @@ import (
 )
 
 // newConfigCmd builds the `boo config` subcommand tree.
-//
-// The bare `boo config` is an alias for `boo config show` — printing
-// the effective config is the most common operation and there's no
-// reason to require an extra word for it.
+// The bare `boo config` is an alias for `boo config show`.
 func newConfigCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
@@ -64,9 +61,8 @@ func newConfigPathCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "path",
 		Short: "Print the config file path",
-		// NOTE: deliberately does NOT call newApp() so that a malformed
-		// config file doesn't block the one command the user would run to
-		// find and fix it. Mirrors the pattern used by `boo doctor`.
+		// NOTE: does NOT call newApp() so a malformed config doesn't block the one command
+		// the user would run to find and fix it.
 		RunE: func(c *cobra.Command, _ []string) error {
 			p, err := state.Default()
 			if err != nil {
@@ -90,17 +86,12 @@ loads the file — if you save broken YAML, the next boo command will
 error.
 
 $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
-		// NOTE: deliberately does NOT call newApp() so that a malformed
-		// config file doesn't block the recovery command. Paths are
-		// resolved directly from state.Default(). Mirrors `boo doctor`.
+		// NOTE: does NOT call newApp() so a malformed config doesn't block the recovery command.
 		RunE: func(c *cobra.Command, _ []string) error {
 			p, err := state.Default()
 			if err != nil {
 				return err
 			}
-			// Ensure the config directory exists so the editor can open
-			// (or create) the file there. We only need ConfigDir, not
-			// the full EnsureDirs set.
 			if err := os.MkdirAll(p.ConfigDir, 0o755); err != nil {
 				return fmt.Errorf("create config dir %s: %w", p.ConfigDir, err)
 			}
@@ -115,13 +106,8 @@ $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
 	}
 }
 
-// runConfigShow prints the effective config as YAML-ish key/value pairs
-// alongside the source ("factory" or the config file path) of each value.
-//
-// We deliberately don't emit a YAML document the user could paste back:
-// the source annotations would have to be comments and round-tripping
-// becomes fragile. The current output is for humans to read, and that
-// only.
+// runConfigShow prints the effective config as key/value pairs with source annotations.
+// Output is human-readable only — not a YAML doc (source annotations make round-tripping fragile).
 func runConfigShow(w io.Writer) error {
 	a, err := newApp()
 	if err != nil {
@@ -157,17 +143,13 @@ func runConfigShow(w io.Writer) error {
 	return nil
 }
 
-// configJSONField is one key in the JSON-formatted config dump. We
-// pair value+source so consumers can answer both "what is X?" and
-// "did the user set it, or are we showing the factory default?".
+// configJSONField pairs a config value with its source ("factory" or file path).
 type configJSONField struct {
 	Value  string `json:"value"`
 	Source string `json:"source"`
 }
 
-// configJSONOut is the wire shape of `boo config show --json`. Keyed
-// the same way as the human renderer (dotted paths) so docs only
-// have to teach one vocabulary.
+// configJSONOut is the wire shape of `boo config show --json`. Keys use the same dotted paths as the human renderer.
 type configJSONOut struct {
 	ConfigFile string                     `json:"config_file"`
 	Values     map[string]configJSONField `json:"values"`

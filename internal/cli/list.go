@@ -44,10 +44,7 @@ func newListCmd() *cobra.Command {
 }
 
 // listJSONEntry is the per-project record emitted by `boo list --json`.
-// We keep this as an explicit type (rather than dumping project.Project
-// directly) so the wire format is decoupled from internal storage:
-// future changes to Project's struct layout don't silently change
-// what scripts see.
+// Explicit type decouples the wire format from internal storage so changes to project.Project don't silently break scripts.
 type listJSONEntry struct {
 	Name           string    `json:"name"`
 	Dir            string    `json:"dir"`
@@ -58,9 +55,7 @@ type listJSONEntry struct {
 	CreatedAt      time.Time `json:"created_at,omitempty"`
 }
 
-// renderListJSON prints the project list as a JSON array. Empty
-// registries emit `[]`, not null — easier to consume from jq or
-// languages whose unmarshallers reject null arrays.
+// renderListJSON prints the project list as a JSON array. Empty registries emit `[]`, not null.
 func renderListJSON(ctx context.Context, w io.Writer, a *app, projects []project.Project) error {
 	if ctx == nil {
 		ctx = context.Background()
