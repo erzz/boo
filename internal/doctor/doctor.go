@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/erzz/boo/internal/ghostty"
@@ -54,6 +55,11 @@ type Result struct {
 // stabilized in 1.3.x.
 const supportedGhosttyMin = "1.3.0"
 
+// maxTestedGhostty is the highest Ghostty version boo has been explicitly
+// tested against. Versions beyond this produce a WARN so users know to check
+// for compatibility issues but are not blocked from using boo.
+const maxTestedGhostty = "1.3.99"
+
 // CheckFunc takes the running set of results so far and returns the next
 // result. This lets later checks short-circuit based on earlier outcomes.
 type CheckFunc func(ctx context.Context, prior []Result) Result
@@ -64,7 +70,7 @@ func AllChecks(client *ghostty.Client) []CheckFunc {
 		checkPlatform,
 		checkGhosttyInstalled,
 		ghosttyRunningCheck(client),
-		ghosttyVersionRangeCheck(),
+		ghosttyVersionRangeCheck(client),
 		ghosttyAutomationCheck(client),
 		checkFzfOptional,
 	}
@@ -246,8 +252,8 @@ func ghosttyRunningCheck(client *ghostty.Client) CheckFunc {
 	}
 }
 
-func ghosttyVersionRangeCheck() CheckFunc {
-	return func(_ context.Context, prior []Result) Result {
+func ghosttyVersionRangeCheck(client *ghostty.Client) CheckFunc {
+	return func(ctx context.Context, prior []Result) Result {
 		runR, ok := previousResult(prior, "ghostty running")
 		if !ok || runR.Status == Fail || runR.Status == Skip {
 			return Result{Name: "ghostty version", Status: Skip, Detail: "skipped (Ghostty not responsive)"}
@@ -256,19 +262,81 @@ func ghosttyVersionRangeCheck() CheckFunc {
 			// Not running yet; we can't check version.
 			return Result{Name: "ghostty version", Status: Skip, Detail: "skipped (Ghostty not running)"}
 		}
-		// We have an OK responsive result, but the version string is in its Detail
-		// only as "responding to AppleScript". Re-derive — in the future the running
-		// check should propagate the version. For now we use the same client via a
-		// closure factory; here we just trust the previous OK and parse its detail
-		// is not feasible. Leave as a TODO marker by reporting OK with a hint.
-		// TODO(boo): plumb version string from the running check into this one.
+		// Ghostty is responsive — fetch the version string.
+		ver, err := client.Version(ctx)
+		if err != nil {
+			return Result{
+				Name:   "ghostty version",
+				Status: Fail,
+				Detail: fmt.Sprintf("could not read version: %v", err),
+				Hint:   "Run `osascript -l JavaScript -e 'Application(\"Ghostty\").version()'` to reproduce.",
+			}
+		}
+		return checkVersionRange(ver)
+	}
+}
+
+// checkVersionRange compares ver against the supported range and returns the
+// appropriate Result.  Extracted so it can be unit-tested without a live Ghostty.
+func checkVersionRange(ver string) Result {
+	if ver == "" {
+		return Result{
+			Name:   "ghostty version",
+			Status: Fail,
+			Detail: "Ghostty returned an empty version string",
+			Hint:   "Try upgrading Ghostty.",
+		}
+	}
+	switch {
+	case compareVersions(ver, supportedGhosttyMin) < 0:
+		return Result{
+			Name:   "ghostty version",
+			Status: Fail,
+			Detail: fmt.Sprintf("version %s is older than minimum supported %s", ver, supportedGhosttyMin),
+			Hint:   fmt.Sprintf("Upgrade Ghostty to >= %s; earlier versions lack JXA API features boo relies on.", supportedGhosttyMin),
+		}
+	case compareVersions(ver, maxTestedGhostty) > 0:
+		return Result{
+			Name:   "ghostty version",
+			Status: Warn,
+			Detail: fmt.Sprintf("version %s is newer than the tested ceiling %s", ver, maxTestedGhostty),
+			Hint:   "boo may work fine; it just hasn't been validated against this Ghostty release. Watch for unexpected behaviour.",
+		}
+	default:
 		return Result{
 			Name:   "ghostty version",
 			Status: OK,
-			Detail: "version compatibility check pending plumbing",
-			Hint:   fmt.Sprintf("boo is tested against Ghostty >= %s.", supportedGhosttyMin),
+			Detail: fmt.Sprintf("version %s (supported range %s – %s)", ver, supportedGhosttyMin, maxTestedGhostty),
 		}
 	}
+}
+
+// compareVersions compares two dotted-decimal version strings (e.g. "1.3.0").
+// Returns -1 if a < b, 0 if a == b, 1 if a > b.  Non-numeric segments parse
+// as 0 rather than erroring, so "1.3.0-rc1" sorts between "1.2.x" and "1.3.0".
+func compareVersions(a, b string) int {
+	partsA := strings.Split(a, ".")
+	partsB := strings.Split(b, ".")
+	maxLen := len(partsA)
+	if len(partsB) > maxLen {
+		maxLen = len(partsB)
+	}
+	for i := 0; i < maxLen; i++ {
+		var ai, bi int
+		if i < len(partsA) {
+			ai, _ = strconv.Atoi(partsA[i])
+		}
+		if i < len(partsB) {
+			bi, _ = strconv.Atoi(partsB[i])
+		}
+		if ai < bi {
+			return -1
+		}
+		if ai > bi {
+			return 1
+		}
+	}
+	return 0
 }
 
 func ghosttyAutomationCheck(client *ghostty.Client) CheckFunc {
