@@ -148,6 +148,44 @@ func TestValidate_RejectsExcessiveDepth(t *testing.T) {
 	}
 }
 
+// TestParse_UnknownFieldErrors ensures that typos in YAML field names are
+// rejected rather than silently ignored.  A user who writes `windws:` instead
+// of `windows:` (or similar) would otherwise see their layout silently revert
+// to the default — strict decoding surfaces the mistake immediately.
+func TestParse_UnknownFieldErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{
+			"unknown top-level field",
+			`name: test
+windws:
+  - name: main
+    split:
+      cwd: .
+`,
+		},
+		{
+			"unknown field inside split",
+			`name: test
+tabs:
+  - name: main
+    split:
+      comand: nvim .
+`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Parse([]byte(c.yaml))
+			if err == nil {
+				t.Fatalf("Parse(%q): expected error for unknown field, got nil", c.name)
+			}
+		})
+	}
+}
+
 // IsLeaf is the canonical predicate downstream code branches on. If its
 // definition drifts from Validate's, things will misbehave silently
 // (renderer rendering the wrong shape, JXA splitting the wrong terminal).

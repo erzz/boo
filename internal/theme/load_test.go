@@ -230,3 +230,21 @@ func TestBuiltinYAML(t *testing.T) {
 		t.Error("BuiltinYAML should error for unknown theme")
 	}
 }
+
+// TestResolve_UnknownFieldErrors verifies that a user theme with a typo in a
+// field name (e.g. "acent" instead of "accent") is rejected rather than
+// silently dropped.  Strict decoding surfaces the mistake immediately.
+func TestResolve_UnknownFieldErrors(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	typo := []byte(`name: oops
+colors:
+  acent: "#ff0000"
+`)
+	if err := os.WriteFile(filepath.Join(dir, "oops.yaml"), typo, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resolve(dir, "oops"); err == nil {
+		t.Error("Resolve should error on unknown field 'acent' (typo of 'accent'), got nil")
+	}
+}

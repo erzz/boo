@@ -111,8 +111,18 @@ func TestLoad_TildeExpansionInProjectsDir(t *testing.T) {
 	}
 }
 
+func TestLoad_UnknownFieldErrors(t *testing.T) {
+	// A typo like `defalt_layout:` must be caught rather than silently
+	// ignored, so the user knows their config key isn't being applied.
+	dir := t.TempDir()
+	p := writeFile(t, dir, "config.yaml", "defalt_layout: triple\n") // typo
+	_, _, err := Load(p)
+	if err == nil {
+		t.Fatal("expected error for unknown field 'defalt_layout', got nil")
+	}
+}
+
 func TestLoad_EmptyFileIsValid(t *testing.T) {
-	// An empty config.yaml is a perfectly reasonable thing for a
 	// user to have ("I want a config file but no overrides yet").
 	// Must not error and must yield factory defaults.
 	dir := t.TempDir()

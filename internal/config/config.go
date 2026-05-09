@@ -98,7 +98,7 @@ func Load(path string) (Config, Sources, error) {
 	}
 
 	var fromFile Config
-	if err := yaml.Unmarshal(data, &fromFile); err != nil {
+	if err := yaml.UnmarshalStrict(data, &fromFile); err != nil {
 		return cfg, src, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 

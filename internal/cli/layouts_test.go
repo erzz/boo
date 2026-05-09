@@ -88,10 +88,14 @@ func TestRunLayouts_UserTemplateIsTaggedUserAndShadowsBuiltin(t *testing.T) {
 	a := makeAppForLayouts(t)
 	// Drop a user override of `1x1x1`. Same name, different
 	// description so we can tell which one rendered.
+	// Note: the description comes from the leading comment block (see
+	// extractDescription), not a YAML field. `split:` is the correct
+	// key (json:"split") — not `root:`.
 	userYAML := []byte(`# This is the user's override.
 name: 1x1x1
 tabs:
-  - root:
+  - name: main
+    split:
       cwd: "."
 `)
 	if err := os.WriteFile(filepath.Join(a.Paths.LayoutsDir, "1x1x1.yaml"), userYAML, 0o644); err != nil {

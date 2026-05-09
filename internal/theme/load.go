@@ -158,7 +158,7 @@ func BuiltinYAML(name string) ([]byte, error) {
 
 func parseTheme(data []byte, defaultName string) (Theme, error) {
 	var t Theme
-	if err := yaml.Unmarshal(data, &t); err != nil {
+	if err := yaml.UnmarshalStrict(data, &t); err != nil {
 		return Theme{}, err
 	}
 	if t.Name == "" {

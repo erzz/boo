@@ -126,7 +126,7 @@ func Default() Layout {
 // Parse decodes a YAML document into a Layout, then validates it.
 func Parse(data []byte) (Layout, error) {
 	var l Layout
-	if err := yaml.Unmarshal(data, &l); err != nil {
+	if err := yaml.UnmarshalStrict(data, &l); err != nil {
 		return Layout{}, fmt.Errorf("layout: parse: %w", err)
 	}
 	if err := l.Validate(); err != nil {
