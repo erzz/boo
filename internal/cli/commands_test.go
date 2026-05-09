@@ -13,6 +13,7 @@ import (
 	booexec "github.com/erzz/boo/internal/exec"
 	"github.com/erzz/boo/internal/ghostty"
 	"github.com/erzz/boo/internal/layout"
+	"github.com/erzz/boo/internal/layoutpreview"
 	"github.com/erzz/boo/internal/project"
 	"github.com/erzz/boo/internal/state"
 )
@@ -526,4 +527,55 @@ func mapKeys(m map[string]any) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// TestProjectPreviewer_UsesSavedLayoutOverTemplate verifies that the right-pane
+// project preview renders the on-disk saved layout snapshot rather than
+// resolving the template name from the registry.  This ensures that manual
+// edits via `boo edit` / `boo save` are reflected in the picker immediately.
+func TestProjectPreviewer_UsesSavedLayoutOverTemplate(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+
+	// Register with template "triple" (3-pane layout).
+	registerProjectForTest(t, a, "proj", dir, "triple")
+
+	// Overwrite the saved snapshot with a single-pane layout — deliberately
+	// different from the "triple" template so we can tell which was rendered.
+	singlePane := layout.Layout{
+		Name: "single",
+		Tabs: []layout.Tab{{
+			Name: "main",
+			Root: layout.Split{Cwd: "."},
+		}},
+	}
+	if err := project.SaveLayout(a.Paths, "proj", singlePane); err != nil {
+		t.Fatalf("SaveLayout: %v", err)
+	}
+
+	previewer := projectPreviewer(context.Background(), a)
+	got := previewer("proj")
+
+	if got == "" {
+		t.Fatal("projectPreviewer returned empty string; expected project info")
+	}
+
+	// Render both layouts at the width the previewer uses.
+	const previewWidth = 36
+	savedRendered := layoutpreview.RenderLayout(singlePane, previewWidth)
+
+	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, "triple")
+	if err != nil {
+		t.Fatalf("resolve triple: %v", err)
+	}
+	templateRendered := layoutpreview.RenderLayout(resolved.Layout, previewWidth)
+
+	if !strings.Contains(got, savedRendered) {
+		t.Errorf("preview does not contain saved layout rendering.\nPreview:\n%s\nExpected substring:\n%s", got, savedRendered)
+	}
+	// The template rendering must NOT appear (assuming they differ, which they
+	// do: single pane vs. 3-pane triple layout).
+	if savedRendered != templateRendered && strings.Contains(got, templateRendered) {
+		t.Errorf("preview should show saved layout (single pane), not the template (triple).\nGot:\n%s", got)
+	}
 }

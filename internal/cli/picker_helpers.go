@@ -419,14 +419,26 @@ func projectPreviewer(ctx context.Context, a *app) func(string) string {
 		writeRow(&b, "last", lastLaunched)
 
 		// Layout preview underneath.
-		if r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, p.Layout); err == nil {
-			rendered := layoutpreview.RenderLayout(r.Layout, rightPaneInnerWidth)
-			if rendered != "" {
-				b.WriteString("\n")
-				b.WriteString(faint("layout preview"))
-				b.WriteString("\n")
-				b.WriteString(rendered)
+		// Prefer the saved snapshot (layout.yaml) which reflects any edits
+		// made via `boo edit` or `boo save` since registration. Fall back to
+		// the template only when no saved file exists yet. Any other error
+		// (parse failure, permission denied, etc.) renders an explicit error
+		// message so a malformed layout.yaml never silently shows stale data.
+		var rendered string
+		if saved, err := project.LoadLayout(a.Paths, p.Name); err == nil {
+			rendered = layoutpreview.RenderLayout(saved, rightPaneInnerWidth)
+		} else if errors.Is(err, os.ErrNotExist) {
+			if r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, p.Layout); err == nil {
+				rendered = layoutpreview.RenderLayout(r.Layout, rightPaneInnerWidth)
 			}
+		} else {
+			rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("✖ layout unreadable")
+		}
+		if rendered != "" {
+			b.WriteString("\n")
+			b.WriteString(faint("layout preview"))
+			b.WriteString("\n")
+			b.WriteString(rendered)
 		}
 		return b.String()
 	}
