@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -9,12 +10,15 @@ import (
 )
 
 // NewRoot returns the root cobra command. All subcommands are registered here.
-func NewRoot() *cobra.Command {
+// version, commit, and date are injected at build time via -ldflags (see .goreleaser.yaml).
+// When built with plain `go build` they default to "dev", "none", "unknown".
+func NewRoot(version, commit, date string) *cobra.Command {
 	var verbose bool
 
 	root := &cobra.Command{
-		Use:   "boo [project]",
-		Short: "Project launcher for Ghostty",
+		Use:     "boo [project]",
+		Short:   "Project launcher for Ghostty",
+		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 		Long: `boo is a project launcher for the Ghostty terminal emulator.
 
 Switch between project-scoped Ghostty windows by name. Each project remembers

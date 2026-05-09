@@ -1,0 +1,50 @@
+name: Release
+
+# Triggered by pushing a version tag.  Create a release with:
+#   git tag v1.2.3 && git push origin v1.2.3
+on:
+  push:
+    tags:
+      - "v*"
+
+# Required secrets (set in repo Settings → Secrets → Actions):
+#   HOMEBREW_TAP_GITHUB_TOKEN — Personal Access Token with `repo` scope on
+#                               the erzz/homebrew-tap repository.
+#                               GoReleaser uses it to push the formula update.
+
+permissions:
+  contents: write # create GitHub Releases and upload assets
+
+jobs:
+  release:
+    name: GoReleaser
+    # ubuntu is fine: CGO_ENABLED=0 and GoReleaser's universal_binaries
+    # support is pure-Go (no lipo), so macOS is not required to build
+    # the darwin universal binary.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history is required so GoReleaser can build the changelog
+          # from the previous tag to HEAD.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          # Reads the `go` directive from go.mod — stays in sync automatically.
+          go-version-file: go.mod
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          # Always pin to a specific major version; bump intentionally.
+          version: "~> v2"
+          args: release --clean
+        env:
+          # GITHUB_TOKEN is provided automatically by Actions; it has
+          # contents:write on the current repo (set above) to create releases.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT that can push to erzz/homebrew-tap.  Must be created manually
+          # and stored as an Actions secret named HOMEBREW_TAP_GITHUB_TOKEN.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

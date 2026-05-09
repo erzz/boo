@@ -183,7 +183,21 @@ The first time boo controls Ghostty, macOS will prompt for **Automation** permis
 detects and surfaces the common setup issues (missing Ghostty, version mismatch, missing automation
 permission, missing `$EDITOR`).
 
-## Build
+## Installation
+
+### Homebrew (recommended)
+
+```sh
+brew install erzz/tap/boo
+```
+
+After installing, run the setup check:
+
+```sh
+boo doctor
+```
+
+### Build from source
 
 ```
 make build
@@ -195,4 +209,4 @@ release.
 
 ## License
 
-TBD.
+[MIT](./LICENSE)

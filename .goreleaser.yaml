@@ -1,0 +1,115 @@
+# GoReleaser v2 configuration for boo.
+# Docs: https://goreleaser.com/customization/
+#
+# Local smoke test: goreleaser release --snapshot --clean
+# Config lint:      goreleaser check
+version: 2
+
+builds:
+  - id: boo
+    main: ./cmd/boo
+    binary: boo
+    env:
+      - CGO_ENABLED=0
+    # boo drives Ghostty via JXA/AppleScript — macOS only for v1.
+    # Do NOT add linux or windows: the binary exits immediately on non-macOS.
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+# Merge the arm64 + amd64 darwin binaries into a single universal binary.
+# GoReleaser does this in pure Go (no lipo required), so the release runner
+# does not need to be macOS.  replace: true removes the individual-arch
+# artifacts so archives and checksums only see the merged binary.
+universal_binaries:
+  - ids:
+      - boo
+    replace: true
+
+archives:
+  - id: default
+    format: tar.gz
+    # arch will be "all" for the universal binary, producing e.g.
+    # boo_1.2.3_darwin_all.tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  # Skip commits that are noise in a release note.
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+      - "^ci:"
+      - "^build:"
+      - "^style:"
+      - "^refactor:"
+      - "Merge pull request"
+      - "Merge branch"
+  # Group remaining commits into sections.
+  groups:
+    - title: "New Features"
+      regexp: "^feat"
+      order: 0
+    - title: "Bug Fixes"
+      regexp: "^fix"
+      order: 1
+    - title: "Other"
+      order: 999
+
+# goreleaser release --snapshot --clean  (local dry-run, no publishing)
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# Publish formula to erzz/homebrew-tap.
+# The tap repo must exist before the first release — see docs/RELEASING.md.
+# HOMEBREW_TAP_GITHUB_TOKEN must be set (PAT with repo scope on the tap).
+brews:
+  - name: boo
+    ids:
+      - default
+    repository:
+      owner: erzz
+      name: homebrew-tap
+      # Token is injected from the HOMEBREW_TAP_GITHUB_TOKEN Actions secret.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_message_template: "chore: brew formula update for {{ .ProjectName }} {{ .Tag }}"
+    # Standard Homebrew tap layout: formulae live in Formula/.
+    directory: Formula
+    homepage: "https://github.com/erzz/boo"
+    description: "Project launcher for the Ghostty terminal emulator on macOS"
+    license: "MIT"
+    # Skip pushing the formula for snapshot / pre-release builds.
+    skip_upload: auto
+    # Inject a depends_on :macos guard so Homebrew refuses to install on Linux.
+    custom_block: |
+      depends_on :macos
+    caveats: |
+      boo requires Ghostty to be installed on your Mac:
+        https://ghostty.org
+
+      After installing, run the environment check:
+        boo doctor
+
+      The first time boo controls Ghostty, macOS will prompt for
+      Automation permission — grant it when asked.
+    test: |
+      system "#{bin}/boo", "--version"

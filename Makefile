@@ -1,4 +1,4 @@
-.PHONY: build test test-int lint fmt clean run
+.PHONY: build test test-int lint fmt clean run snapshot release-check
 
 BINARY := bin/boo
 PKG := ./...
@@ -25,3 +25,13 @@ clean:
 
 run: build
 	./$(BINARY)
+
+# Build a local snapshot (no publishing, no git tag required).
+# Output lands in dist/.  Requires: brew install goreleaser
+snapshot:
+	goreleaser release --snapshot --clean
+
+# Validate .goreleaser.yaml without building anything.
+# Requires: brew install goreleaser
+release-check:
+	goreleaser check
