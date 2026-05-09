@@ -1385,7 +1385,7 @@ func (m *model) viewList() string {
 	// the content width we want (and what we passed to list.SetSize),
 	// so add back the 2 cols of horizontal padding here.
 	listBoxed := m.theme.ListPaneBorder.
-		Width(innerListWidth + 2).
+		Width(innerListWidth + listPanePaddingCols).
 		Height(innerHeight).
 		Render(listView)
 
@@ -1463,23 +1463,17 @@ func (m *model) viewRightPane() string {
 	// rightPaneWidth is the screen footprint (border 2 + padding 2 +
 	// content). lipgloss .Width(N) renders a box that is N + border
 	// wide, AND .Width consumes the padding — i.e. content area is
-	// N - horizontal padding. So pass rightPaneWidth - 2 (for the
-	// border) and the resulting content area = rightPaneWidth - 4
-	// = innerWidth, which content code sizes to.
-	const innerWidth = rightPaneWidth - 4
+	// N - horizontal padding. So pass rightPaneWidth - rightPaneBorderCols
+	// and the resulting content area = rightPaneWidth - rightPaneBorderCols
+	// - rightPanePaddingCols = rightPaneInnerWidth.
 	innerHeight := m.usableInnerHeight()
-	// Right pane gets +1 height to match the list pane's apparent
-	// rendered height. The list pane's content (brand strip + bubbles
-	// list) ends up 1 visual row taller than its declared Height in
-	// the actual terminal — likely a lipgloss padding/wrap interaction
-	// that doesn't reproduce in unit tests but is visible at runtime.
-	// Without this, the right pane's bottom border sits 1 row above
-	// the list pane's, which looks broken.
-	border := m.theme.RightPaneBorder.Width(rightPaneWidth - 2).Height(innerHeight + 1)
+	// Right pane gets +borderCorrectionPx height to match the list pane's
+	// apparent rendered height at runtime. See geometry.go for why.
+	border := m.theme.RightPaneBorder.Width(rightPaneWidth - rightPaneBorderCols).Height(innerHeight + borderCorrectionPx)
 
 	switch v := m.list.SelectedItem().(type) {
 	case Item:
-		return border.Render(clipToHeight(m.renderItemDetail(v, innerWidth), innerHeight))
+		return border.Render(clipToHeight(m.renderItemDetail(v, rightPaneInnerWidth), innerHeight))
 	case newProjectItem:
 		// If there are no real projects yet, lean into the empty
 		// state with the brand mascot. Once the user has at least
