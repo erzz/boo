@@ -1,0 +1,37 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    ["@semantic-release/commit-analyzer", {
+      "preset": "conventionalcommits",
+      "releaseRules": [
+        { "type": "docs", "release": false },
+        { "type": "chore", "release": false },
+        { "type": "test", "release": false },
+        { "type": "ci", "release": false },
+        { "type": "style", "release": false },
+        { "type": "refactor", "release": "patch" },
+        { "type": "perf", "release": "patch" },
+        { "type": "build", "release": false }
+      ]
+    }],
+    ["@semantic-release/release-notes-generator", {
+      "preset": "conventionalcommits",
+      "presetConfig": {
+        "types": [
+          { "type": "feat", "section": "Features" },
+          { "type": "fix", "section": "Bug Fixes" },
+          { "type": "perf", "section": "Performance" },
+          { "type": "refactor", "section": "Refactoring" },
+          { "type": "docs", "section": "Documentation", "hidden": true },
+          { "type": "chore", "section": "Chores", "hidden": true },
+          { "type": "test", "section": "Tests", "hidden": true },
+          { "type": "ci", "section": "CI", "hidden": true },
+          { "type": "style", "section": "Style", "hidden": true },
+          { "type": "build", "section": "Build", "hidden": true }
+        ]
+      }
+    }],
+    "@semantic-release/github"
+  ]
+}

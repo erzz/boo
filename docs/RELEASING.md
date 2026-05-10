@@ -1,120 +1,73 @@
 # Releasing boo
 
-This document covers how to cut a release, set up the Homebrew tap for the first
-time, and what secrets need to exist in the repo before anything can publish.
+Releases are automated via semantic-release + GoReleaser. Merge to `main` and
+the pipelines handle the rest.
 
 ---
 
-## Prerequisites
+## How releases happen
 
-Install GoReleaser locally for sanity checks:
+1. Merge one or more commits to `main` using [Conventional Commits](https://www.conventionalcommits.org/).
+2. `release.yml` runs semantic-release, which analyses commits since the last tag, decides the version bump, creates the tag, and publishes a GitHub Release with auto-generated notes.
+3. The new tag triggers `goreleaser.yml`, which builds the universal binary, attaches it to the release semantic-release created, and pushes the Homebrew formula to `erzz/homebrew-tap`.
+
+---
+
+## Commit types that trigger releases
+
+| Type | Release |
+|---|---|
+| `feat:` | minor |
+| `fix:` | patch |
+| `refactor:`, `perf:` | patch |
+| `docs:`, `chore:`, `test:`, `ci:`, `style:`, `build:` | none |
+| `feat!:` or `BREAKING CHANGE:` in body | major |
+
+---
+
+## First release (v0.1.0)
+
+semantic-release uses `1.0.0` as the hardcoded first release when no tags exist.
+To start at `v0.1.0`, cut it manually once off `main`:
 
 ```sh
-brew install goreleaser
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
----
-
-## One-time tap setup
-
-GoReleaser pushes the Homebrew formula to a separate tap repository.
-You must create that repo **before** the first tag.
-
-1. Create an empty repo at `https://github.com/erzz/homebrew-tap`
-   (public, no README, no licence — GoReleaser manages the contents).
-2. Create a Personal Access Token (PAT):
-   - Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
-   - Scope: **Contents → Read and write** on the `erzz/homebrew-tap` repo only
-   - Classic token alternative: `repo` scope is sufficient
-3. Add the PAT as an Actions secret on **this** repo (`erzz/boo`):
-   - Settings → Secrets and variables → Actions → New repository secret
-   - Name: `HOMEBREW_TAP_GITHUB_TOKEN`
-   - Value: the PAT from step 2
-
-That's it. GoReleaser will create and update `Formula/boo.rb` automatically on
-every tagged release.
+This fires `goreleaser.yml` directly and ships v0.1.0. From the next `feat:` or
+`fix:` commit on `main`, semantic-release takes over and bumps from there
+(`v0.1.1`, `v0.2.0`, …).
 
 ---
 
-## Required Actions secrets
+## One-time setup (before first release)
 
-| Secret name                  | Purpose                                         |
-| ---------------------------- | ----------------------------------------------- |
-| `HOMEBREW_TAP_GITHUB_TOKEN`  | PAT with `repo` scope on `erzz/homebrew-tap`    |
-| `GITHUB_TOKEN`               | Auto-provided by Actions — no setup needed       |
+1. Create an empty public repo at `https://github.com/erzz/homebrew-tap`.
+2. Create a Personal Access Token with `repo` scope on `erzz/homebrew-tap`.
+3. Add it as an Actions secret named `HOMEBREW_TAP_GITHUB_TOKEN` on `erzz/boo`.
+4. Cut the `v0.1.0` tag manually (see above).
 
----
-
-## Cutting a release
-
-1. **Ensure `main` is clean and all tests pass:**
-
-   ```sh
-   make test
-   make lint
-   ```
-
-2. **Create and push an annotated tag:**
-
-   ```sh
-   git tag -a v1.2.3 -m "release v1.2.3"
-   git push origin v1.2.3
-   ```
-
-   That's all. The `release.yml` workflow triggers on the tag push and
-   GoReleaser handles the rest:
-   - Builds `boo` for `darwin/arm64` and `darwin/amd64`
-   - Merges them into a universal binary
-   - Creates a GitHub Release with the archive and `checksums.txt`
-   - Pushes an updated formula to `erzz/homebrew-tap`
-
-3. **Verify the release:**
-   - Check the Actions run at `https://github.com/erzz/boo/actions`
-   - Check the release at `https://github.com/erzz/boo/releases`
-   - Check the formula at `https://github.com/erzz/homebrew-tap`
+`GITHUB_TOKEN` is auto-provided by Actions — no setup needed.
 
 ---
 
-## Local dry-run (snapshot)
-
-Test the full GoReleaser pipeline locally without creating a tag or publishing
-anything:
+## Local dry-runs
 
 ```sh
+# GoReleaser snapshot (no publishing, no tag required)
 make snapshot
-# or: goreleaser release --snapshot --clean
-```
 
-Artefacts land in `dist/`. Inspect them; nothing is pushed.
-
-## Validate the config
-
-```sh
-make release-check
-# or: goreleaser check
+# semantic-release dry-run (requires Node; will fail without GH auth but parses config)
+npx --yes semantic-release --dry-run --no-ci
 ```
 
 ---
 
-## Version scheme
+## Failure modes
 
-Use [Semantic Versioning](https://semver.org): `vMAJOR.MINOR.PATCH`.
-
-- `PATCH` — bug fixes, no new features
-- `MINOR` — new features, backwards-compatible
-- `MAJOR` — breaking changes
-
-Pre-releases are not formally supported yet; use snapshot builds for testing.
-
----
-
-## Changelog
-
-GoReleaser builds the changelog automatically from commit messages between the
-previous tag and `HEAD`. Commits matching the following prefixes are excluded
-from release notes (they are noise, not user-visible changes):
-
-- `docs:`, `chore:`, `test:`, `ci:`, `build:`, `style:`, `refactor:`
-
-Use [Conventional Commits](https://www.conventionalcommits.org/) so that `feat:`
-and `fix:` commits surface correctly in the release notes.
+| Symptom | Fix |
+|---|---|
+| semantic-release fails to push tag | Check `contents: write` permission on `release.yml` |
+| Tag created but GoReleaser failed | Re-run `goreleaser.yml` on the tag — safe because `release.mode: keep-existing` |
+| Need to skip a release | Add `[skip ci]` to the commit message |
