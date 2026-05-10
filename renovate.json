@@ -33,7 +33,7 @@
     {
       "description": "Group Bubble Tea ecosystem (charmbracelet/*) together",
       "matchManagers": ["gomod"],
-      "matchPackagePatterns": ["^github.com/charmbracelet/"],
+      "matchPackageNames": ["github.com/charmbracelet/**"],
       "groupName": "charmbracelet"
     },
     {
