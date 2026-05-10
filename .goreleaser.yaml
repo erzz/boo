@@ -71,7 +71,7 @@ brews:
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    commit_message_template: "chore: brew formula update for {{ .ProjectName }} {{ .Tag }}"
+    commit_msg_template: "chore: brew formula update for {{ .ProjectName }} {{ .Tag }}"
     # Standard Homebrew tap layout: formulae live in Formula/.
     directory: Formula
     homepage: "https://github.com/erzz/boo"
