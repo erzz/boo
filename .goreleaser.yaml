@@ -47,30 +47,10 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
-changelog:
-  sort: asc
-  # Skip commits that are noise in a release note.
-  filters:
-    exclude:
-      - "^docs:"
-      - "^chore:"
-      - "^test:"
-      - "^ci:"
-      - "^build:"
-      - "^style:"
-      - "^refactor:"
-      - "Merge pull request"
-      - "Merge branch"
-  # Group remaining commits into sections.
-  groups:
-    - title: "New Features"
-      regexp: "^feat"
-      order: 0
-    - title: "Bug Fixes"
-      regexp: "^fix"
-      order: 1
-    - title: "Other"
-      order: 999
+release:
+  # semantic-release creates the GitHub Release and writes the notes;
+  # we just attach binaries and checksums to it.
+  mode: keep-existing
 
 # goreleaser release --snapshot --clean  (local dry-run, no publishing)
 snapshot:
