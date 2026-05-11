@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -73,9 +72,8 @@ func TestDeriveDestination_DefaultsToCwd(t *testing.T) {
 		t.Fatalf("DeriveDestination: %v", err)
 	}
 	// On macOS /tmp resolves through /private/tmp; both are valid roots.
-	wantSuffix := filepath.Join("boo")
-	if !strings.HasSuffix(got, wantSuffix) {
-		t.Fatalf("DeriveDestination = %q, want suffix %q", got, wantSuffix)
+	if !strings.HasSuffix(got, filepath.Join("boo")) {
+		t.Fatalf("DeriveDestination = %q, want suffix 'boo'", got)
 	}
 	if !filepath.IsAbs(got) {
 		t.Fatalf("expected absolute path, got %q", got)
@@ -190,16 +188,5 @@ func TestClone_PropagatesGitError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "repository not found") {
 		t.Fatalf("expected stderr in error, got %v", err)
-	}
-}
-
-// Sanity: filepath behaves the way we expect on this OS (regression guard for
-// the Windows path separator case if we ever port).
-func TestPathSep_Sanity(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("boo is macOS-only for v1")
-	}
-	if filepath.Separator != '/' {
-		t.Fatalf("unexpected separator %q", filepath.Separator)
 	}
 }

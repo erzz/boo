@@ -11,6 +11,7 @@ import (
 	"time"
 
 	booexec "github.com/erzz/boo/internal/exec"
+	"github.com/erzz/boo/internal/doctor"
 	"github.com/erzz/boo/internal/ghostty"
 	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/layoutpreview"
@@ -489,6 +490,90 @@ func mapKeys(m map[string]any) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// TestShowJSON_BlackBoxSchema: show --json schema via map[string]any to catch tag/shape regressions.
+// The schema is a public contract — scripts consuming boo show --json depend on these key names.
+func TestShowJSON_BlackBoxSchema(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	registerProjectForTest(t, a, "proj", dir, "triple")
+
+	reg, err := project.Load(a.Paths)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p, err := reg.Get("proj")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	rt := project.Runtime{WindowID: "win-abc"}
+
+	var buf bytes.Buffer
+	if err := renderShowJSON(&buf, p, rt, "running", a); err != nil {
+		t.Fatalf("renderShowJSON: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, buf.String())
+	}
+	// Required keys — renaming any of these is a breaking change for scripting users.
+	for _, k := range []string{"name", "dir", "layout", "status", "created_at", "layout_file", "state_file", "state_dir"} {
+		if _, ok := raw[k]; !ok {
+			t.Errorf("show --json missing required key %q (have: %v)", k, mapKeys(raw))
+		}
+	}
+	if raw["name"] != "proj" {
+		t.Errorf("name = %v, want \"proj\"", raw["name"])
+	}
+	if raw["status"] != "running" {
+		t.Errorf("status = %v, want \"running\"", raw["status"])
+	}
+	// window_id present when non-empty (omitempty, but we passed a non-empty value).
+	if raw["window_id"] != "win-abc" {
+		t.Errorf("window_id = %v, want \"win-abc\"", raw["window_id"])
+	}
+}
+
+// TestDoctorJSON_BlackBoxSchema: doctor --json schema via map[string]any.
+// Array of {name, status, detail, hint?} — status is a string ("OK"/"WARN"/…), not an int.
+func TestDoctorJSON_BlackBoxSchema(t *testing.T) {
+	results := []doctor.Result{
+		{Name: "ghostty-installed", Status: doctor.OK, Detail: "found", Hint: ""},
+		{Name: "ghostty-version", Status: doctor.Warn, Detail: "1.0.0", Hint: "update"},
+	}
+	var buf bytes.Buffer
+	if err := renderResultsJSON(&buf, results); err != nil {
+		t.Fatalf("renderResultsJSON: %v", err)
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, buf.String())
+	}
+	if len(raw) != 2 {
+		t.Fatalf("len = %d, want 2", len(raw))
+	}
+	for i, e := range raw {
+		for _, k := range []string{"name", "status", "detail"} {
+			if _, ok := e[k]; !ok {
+				t.Errorf("doctor --json entry[%d] missing required key %q: %v", i, k, e)
+			}
+		}
+	}
+	// status must be a human-readable string, not a raw int.
+	if s, _ := raw[0]["status"].(string); s != "OK" {
+		t.Errorf("entry[0].status = %v, want \"OK\"", raw[0]["status"])
+	}
+	if s, _ := raw[1]["status"].(string); s != "WARN" {
+		t.Errorf("entry[1].status = %v, want \"WARN\"", raw[1]["status"])
+	}
+	// hint omitted when empty (omitempty), present when set.
+	if _, ok := raw[0]["hint"]; ok {
+		t.Errorf("empty hint should be omitted by omitempty, got: %v", raw[0])
+	}
+	if h, _ := raw[1]["hint"].(string); h != "update" {
+		t.Errorf("entry[1].hint = %v, want \"update\"", raw[1]["hint"])
+	}
 }
 
 // TestProjectPreviewer_UsesSavedLayoutOverTemplate: previewer renders the on-disk snapshot,

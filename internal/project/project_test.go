@@ -84,6 +84,44 @@ func TestRegistry_AddGetRemove_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestRegistry_FindByDir: boo (no args) uses FindByDir to detect the current project from $PWD.
+// Wrong answer here silently re-registers an existing project or opens the picker instead.
+func TestRegistry_FindByDir(t *testing.T) {
+	r := &Registry{Projects: []Project{
+		{Name: "alpha", Dir: "/x/alpha"},
+		{Name: "beta", Dir: "/x/beta"},
+	}}
+	p, err := r.FindByDir("/x/beta")
+	if err != nil || p.Name != "beta" {
+		t.Fatalf("FindByDir(/x/beta): %+v %v", p, err)
+	}
+	if _, err := r.FindByDir("/no-such"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing dir, got %v", err)
+	}
+}
+
+// TestRegistry_Update: boo set-layout rewrites a project's metadata in place via Update.
+// If Update silently no-ops or duplicates the entry, the layout change is lost.
+func TestRegistry_Update(t *testing.T) {
+	r := &Registry{}
+	if err := r.Add(Project{Name: "alpha", Dir: "/x/alpha", Layout: "triple"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Update(Project{Name: "alpha", Dir: "/x/alpha", Layout: "1x1x1"}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	p, _ := r.Get("alpha")
+	if p.Layout != "1x1x1" {
+		t.Fatalf("Update did not apply: got layout %q", p.Layout)
+	}
+	if len(r.Projects) != 1 {
+		t.Fatalf("Update must replace in place (no duplication): got %d projects", len(r.Projects))
+	}
+	if err := r.Update(Project{Name: "missing"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing project, got %v", err)
+	}
+}
+
 func TestSaveLoadLayoutAndRuntime(t *testing.T) {
 	root := t.TempDir()
 	p := state.ForRoot(root)

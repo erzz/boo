@@ -68,6 +68,32 @@ func TestParse_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestMarshal_FieldNames: pins the user-visible YAML key names we own via json struct tags.
+// sigs.k8s.io/yaml routes through encoding/json, so renaming a tag changes the on-disk format
+// and silently breaks every existing user layout file. Tab.Root is "split:", not "root:".
+func TestMarshal_FieldNames(t *testing.T) {
+	l := Layout{
+		Name: "check",
+		Tabs: []Tab{{
+			Name: "t",
+			Root: Split{
+				Direction: DirRow,
+				Children:  []Split{{Cwd: "."}, {Cwd: "logs", Command: "tail -f x.log"}},
+			},
+		}},
+	}
+	data, err := Marshal(l)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	for _, key := range []string{"tabs:", "split:", "direction:", "children:", "cwd:", "command:"} {
+		if !strings.Contains(s, key) {
+			t.Errorf("marshalled YAML missing key %q:\n%s", key, s)
+		}
+	}
+}
+
 // TestValidate_Errors: each Validate failure mode in its own case; name matches the user-visible mistake.
 func TestValidate_Errors(t *testing.T) {
 	leaf := Split{Cwd: "."}
@@ -103,11 +129,26 @@ func TestValidate_Errors(t *testing.T) {
 			}}}},
 			"is not one of row|column",
 		},
+		// 2-children invariant: Ghostty's split command halves a pane. Any count != 2 yields wrong
+		// proportions or a no-op. All three bad counts must be rejected.
 		{
-			"interior with one child is degenerate",
+			"interior with one child",
 			Layout{Name: "x", Tabs: []Tab{{Root: Split{
 				Direction: DirRow,
 				Children:  []Split{leaf},
+			}}}},
+			"exactly 2 children",
+		},
+		{
+			"interior with zero children",
+			Layout{Name: "x", Tabs: []Tab{{Root: Split{Direction: DirRow}}}},
+			"exactly 2 children",
+		},
+		{
+			"interior with three children",
+			Layout{Name: "x", Tabs: []Tab{{Root: Split{
+				Direction: DirRow,
+				Children:  []Split{leaf, leaf, leaf},
 			}}}},
 			"exactly 2 children",
 		},

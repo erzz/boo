@@ -3,6 +3,8 @@ package doctor
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -119,7 +121,7 @@ func TestCheckVersionRange(t *testing.T) {
 // ─── ghosttyVersionRangeCheck wiring ─────────────────────────────────────────
 
 // newVersionClient builds a *ghostty.Client whose runner returns versionJSON for every osascript call.
-// Pass json="" + non-nil runErr to simulate broken/unavailable Ghostty.
+// Pass versionJSON="" + non-nil runErr to simulate broken/unavailable Ghostty.
 func newVersionClient(versionJSON string, runErr error) *ghostty.Client {
 	fake := booexec.NewFake(func(_ string, _ []string, _ []byte) ([]byte, []byte, error) {
 		if runErr != nil {
@@ -231,7 +233,6 @@ func TestGhosttyVersionRangeCheck_VersionRouting(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// Build a client that returns the test version.
 			versionJSON := `{"version":"` + c.ver + `"}`
 			client := newVersionClient(versionJSON, nil)
 
@@ -251,7 +252,6 @@ func TestGhosttyVersionRangeCheck_VersionRouting(t *testing.T) {
 // TestGhosttyVersionRangeCheck_CheckNameIsStable: result Name is always "ghostty version" on every path.
 // previousResult / AllChecks rely on this name to locate the result.
 func TestGhosttyVersionRangeCheck_CheckNameIsStable(t *testing.T) {
-	// Test through every code path.
 	paths := []struct {
 		desc   string
 		client *ghostty.Client
@@ -289,8 +289,6 @@ func TestGhosttyVersionRangeCheck_CheckNameIsStable(t *testing.T) {
 // TestAllChecks_IncludesGhosttyVersionCheck: AllChecks() must include ghosttyVersionRangeCheck
 // (catches refactors that accidentally remove it from the chain).
 func TestAllChecks_IncludesGhosttyVersionCheck(t *testing.T) {
-	// Build a client with a valid in-range version. Even if earlier checks skip the version check,
-	// the Result still carries Name="ghostty version".
 	client := newVersionClient(`{"version":"1.3.5"}`, nil)
 
 	checks := AllChecks(client)
@@ -298,9 +296,342 @@ func TestAllChecks_IncludesGhosttyVersionCheck(t *testing.T) {
 
 	for _, r := range results {
 		if r.Name == "ghostty version" {
-			return // found — wiring is intact
+			return // wiring intact
 		}
 	}
 	t.Errorf("AllChecks() result set does not contain a result with Name='ghostty version'; ghosttyVersionRangeCheck may have been removed from the chain")
 }
 
+// ─── Run dispatcher ───────────────────────────────────────────────────────────
+
+// TestRun_AggregatesResults: all checks run in order; worst non-Skip status returned.
+func TestRun_AggregatesResults(t *testing.T) {
+	checks := []CheckFunc{
+		func(_ context.Context, _ []Result) Result { return Result{Name: "a", Status: OK} },
+		func(_ context.Context, _ []Result) Result { return Result{Name: "b", Status: Warn} },
+		func(_ context.Context, _ []Result) Result { return Result{Name: "c", Status: Fail} },
+	}
+	results, worst := Run(context.Background(), checks)
+	if len(results) != 3 {
+		t.Fatalf("len(results) = %d, want 3", len(results))
+	}
+	if results[0].Name != "a" || results[1].Name != "b" || results[2].Name != "c" {
+		t.Errorf("unexpected order: %v", results)
+	}
+	if worst != Fail {
+		t.Errorf("worst = %v, want Fail", worst)
+	}
+}
+
+// TestRun_SkipNotWorst: Skip results do not change the worst-status aggregate.
+func TestRun_SkipNotWorst(t *testing.T) {
+	checks := []CheckFunc{
+		func(_ context.Context, _ []Result) Result { return Result{Name: "a", Status: OK} },
+		func(_ context.Context, _ []Result) Result { return Result{Name: "b", Status: Skip} },
+	}
+	_, worst := Run(context.Background(), checks)
+	if worst != OK {
+		t.Errorf("worst = %v, want OK (Skip must not count as worst)", worst)
+	}
+}
+
+// TestRun_LaterCheckSeesEarlierResults: each check receives the accumulated results so far.
+func TestRun_LaterCheckSeesEarlierResults(t *testing.T) {
+	var priorAtSecond []Result
+	checks := []CheckFunc{
+		func(_ context.Context, _ []Result) Result { return Result{Name: "first", Status: Warn} },
+		func(_ context.Context, prior []Result) Result {
+			priorAtSecond = prior
+			return Result{Name: "second", Status: OK}
+		},
+	}
+	Run(context.Background(), checks)
+	if len(priorAtSecond) != 1 || priorAtSecond[0].Name != "first" {
+		t.Errorf("second check received %v, want [{first Warn ...}]", priorAtSecond)
+	}
+}
+
+// ─── legacyDataDirCheck ───────────────────────────────────────────────────────
+
+// TestLegacyDataDirCheck: warn when old boo state exists; silent OK when HOME is clean.
+func TestLegacyDataDirCheck(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(dir string) // creates files under dir (used as HOME)
+		wantStatus Status
+	}{
+		{
+			name:       "no legacy state → OK",
+			setup:      func(string) {},
+			wantStatus: OK,
+		},
+		{
+			name: "projects.toml present → Warn",
+			setup: func(dir string) {
+				legacyDir := filepath.Join(dir, ".local", "share", "boo")
+				if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(legacyDir, "projects.toml"), []byte(""), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantStatus: Warn,
+		},
+		{
+			name: "projects/ subdir present → Warn",
+			setup: func(dir string) {
+				if err := os.MkdirAll(filepath.Join(dir, ".local", "share", "boo", "projects"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantStatus: Warn,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("HOME", dir)
+			t.Setenv("XDG_DATA_HOME", "") // ensure HOME-derived path is used
+			c.setup(dir)
+			check := legacyDataDirCheck()
+			r := check(context.Background(), nil)
+			if r.Status != c.wantStatus {
+				t.Errorf("Status = %v, want %v (Detail: %q)", r.Status, c.wantStatus, r.Detail)
+			}
+		})
+	}
+}
+
+// TestLegacyDataDirCheck_XDGOverride: XDG_DATA_HOME is respected when set.
+func TestLegacyDataDirCheck_XDGOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	legacyDir := filepath.Join(dir, "boo")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "projects.toml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check := legacyDataDirCheck()
+	r := check(context.Background(), nil)
+	if r.Status != Warn {
+		t.Errorf("Status = %v, want Warn (XDG_DATA_HOME not respected)", r.Status)
+	}
+}
+
+// ─── ConfigCheck ─────────────────────────────────────────────────────────────
+
+// TestConfigCheck: missing → Skip, bad content → Fail, good content → OK.
+func TestConfigCheck(t *testing.T) {
+	cases := []struct {
+		name       string
+		write      string // non-empty means create the file with this content
+		loadErr    error
+		wantStatus Status
+	}{
+		{
+			name:       "missing file → Skip",
+			wantStatus: Skip,
+		},
+		{
+			name:       "present and valid → OK",
+			write:      "key: val",
+			wantStatus: OK,
+		},
+		{
+			name:       "present but load fails → Fail",
+			write:      "key: val",
+			loadErr:    errors.New("parse error"),
+			wantStatus: Fail,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.yaml")
+			if c.write != "" {
+				if err := os.WriteFile(path, []byte(c.write), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			check := ConfigCheck(path, func(string) error { return c.loadErr })
+			r := check(context.Background(), nil)
+			if r.Status != c.wantStatus {
+				t.Errorf("Status = %v, want %v (Detail: %q)", r.Status, c.wantStatus, r.Detail)
+			}
+		})
+	}
+}
+
+// ─── ThemesCheck ─────────────────────────────────────────────────────────────
+
+// TestThemesCheck: missing dir → Skip, validate error → Warn, broken themes → Warn, clean → OK.
+func TestThemesCheck(t *testing.T) {
+	cases := []struct {
+		name       string
+		createDir  bool
+		validateFn func(string) ([]string, error)
+		wantStatus Status
+		wantSubstr string
+	}{
+		{
+			name:       "missing dir → Skip",
+			createDir:  false,
+			validateFn: func(string) ([]string, error) { return nil, nil },
+			wantStatus: Skip,
+		},
+		{
+			name:      "validate error → Warn",
+			createDir: true,
+			validateFn: func(string) ([]string, error) {
+				return nil, errors.New("stat failed")
+			},
+			wantStatus: Warn,
+		},
+		{
+			name:      "broken themes → Warn with count",
+			createDir: true,
+			validateFn: func(string) ([]string, error) {
+				return []string{"bad1.yaml", "bad2.yaml"}, nil
+			},
+			wantStatus: Warn,
+			wantSubstr: "2",
+		},
+		{
+			name:       "all themes valid → OK",
+			createDir:  true,
+			validateFn: func(string) ([]string, error) { return nil, nil },
+			wantStatus: OK,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			themesDir := filepath.Join(dir, "themes")
+			if c.createDir {
+				if err := os.MkdirAll(themesDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			check := ThemesCheck(themesDir, c.validateFn)
+			r := check(context.Background(), nil)
+			if r.Status != c.wantStatus {
+				t.Errorf("Status = %v, want %v (Detail: %q)", r.Status, c.wantStatus, r.Detail)
+			}
+			if c.wantSubstr != "" && !strings.Contains(r.Detail, c.wantSubstr) {
+				t.Errorf("Detail %q does not contain %q", r.Detail, c.wantSubstr)
+			}
+		})
+	}
+}
+
+// ─── ghosttyRunningCheck ─────────────────────────────────────────────────────
+
+// TestGhosttyRunningCheck: prior installed=Fail → Skip; not-running error → Warn;
+// unknown error → Fail; responsive → OK.
+func TestGhosttyRunningCheck(t *testing.T) {
+	cases := []struct {
+		name        string
+		prior       []Result
+		versionJSON string
+		runErr      error
+		wantStatus  Status
+	}{
+		{
+			name:       "ghostty installed check failed → Skip",
+			prior:      []Result{{Name: "ghostty installed", Status: Fail}},
+			wantStatus: Skip,
+		},
+		{
+			name:       "Ghostty not running → Warn",
+			runErr:     errors.New("Ghostty isn't running"),
+			wantStatus: Warn,
+		},
+		{
+			name:       "unknown error → Fail",
+			runErr:     errors.New("unexpected osascript failure"),
+			wantStatus: Fail,
+		},
+		{
+			name:        "Ghostty responsive → OK",
+			versionJSON: `{"version":"1.3.5"}`,
+			wantStatus:  OK,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			client := newVersionClient(c.versionJSON, c.runErr)
+			check := ghosttyRunningCheck(client)
+			r := check(context.Background(), c.prior)
+			if r.Status != c.wantStatus {
+				t.Errorf("Status = %v, want %v (Detail: %q)", r.Status, c.wantStatus, r.Detail)
+			}
+		})
+	}
+}
+
+// ─── ghosttyAutomationCheck ──────────────────────────────────────────────────
+
+// TestGhosttyAutomationCheck: running check not OK → Skip; probe OK → OK;
+// -1743 error → Fail; other probe error → Warn.
+func TestGhosttyAutomationCheck(t *testing.T) {
+	cases := []struct {
+		name       string
+		prior      []Result
+		probeJSON  string
+		probeErr   error
+		wantStatus Status
+	}{
+		{
+			name:       "running check absent → Skip",
+			prior:      nil,
+			wantStatus: Skip,
+		},
+		{
+			name:       "running check = Warn → Skip",
+			prior:      priorWithRunning(Warn),
+			wantStatus: Skip,
+		},
+		{
+			name:       "running check = Fail → Skip",
+			prior:      priorWithRunning(Fail),
+			wantStatus: Skip,
+		},
+		{
+			name:       "probe succeeds → OK",
+			prior:      priorWithRunning(OK),
+			probeJSON:  `{"ok":true}`,
+			wantStatus: OK,
+		},
+		{
+			name:       "automation denied (-1743) → Fail",
+			prior:      priorWithRunning(OK),
+			probeErr:   errors.New("error -1743"),
+			wantStatus: Fail,
+		},
+		{
+			name:       "unknown probe error → Warn",
+			prior:      priorWithRunning(OK),
+			probeErr:   errors.New("unexpected failure"),
+			wantStatus: Warn,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fake := booexec.NewFake(func(_ string, _ []string, _ []byte) ([]byte, []byte, error) {
+				if c.probeErr != nil {
+					return nil, nil, c.probeErr
+				}
+				return []byte(c.probeJSON), nil, nil
+			})
+			client := ghostty.New(fake)
+			check := ghosttyAutomationCheck(client)
+			r := check(context.Background(), c.prior)
+			if r.Status != c.wantStatus {
+				t.Errorf("Status = %v, want %v (Detail: %q)", r.Status, c.wantStatus, r.Detail)
+			}
+		})
+	}
+}

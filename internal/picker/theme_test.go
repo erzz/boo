@@ -22,46 +22,4 @@ func TestThemeByName_UnknownFallsBackSilently(t *testing.T) {
 	}
 }
 
-func TestDefaultTheme_AllFieldsPopulated(t *testing.T) {
-	// Zero-value lipgloss.Style renders input unchanged; we can't assert "is styled" but
-	// can verify no field panics on Render — guards against a new Theme field left unset in defaultTheme().
-	th := defaultTheme()
-	for name, s := range map[string]any{
-		"Title":                  th.Title,
-		"Desc":                   th.Desc,
-		"SelectedTitle":          th.SelectedTitle,
-		"SelectedDesc":           th.SelectedDesc,
-		"StatusRunning":          th.StatusRunning,
-		"StatusStopped":          th.StatusStopped,
-		"StatusBroken":           th.StatusBroken,
-		"Trailing":               th.Trailing,
-		"NewProject":             th.NewProject,
-		"NewProjectFocus":        th.NewProjectFocus,
-		"NewProjectFooter":       th.NewProjectFooter,
-		"ListTitle":              th.ListTitle,
-		"AlreadyRegisteredTitle": th.AlreadyRegisteredTitle,
-		"AlreadyRegisteredName":  th.AlreadyRegisteredName,
-		"AlreadyRegisteredHelp":  th.AlreadyRegisteredHelp,
-		"FormTitle":              th.FormTitle,
-		"FormLabel":              th.FormLabel,
-		"FormLabelFocus":         th.FormLabelFocus,
-		"FormInfo":               th.FormInfo,
-		"FormErr":                th.FormErr,
-		"FormHelp":               th.FormHelp,
-		"FormCyclerArrow":        th.FormCyclerArrow,
-		"FormCyclerArrowFocus":   th.FormCyclerArrowFocus,
-		"RightPaneBorder":        th.RightPaneBorder,
-		"RightPaneTitle":         th.RightPaneTitle,
-		"RightPaneLabel":         th.RightPaneLabel,
-		"RightPaneValue":         th.RightPaneValue,
-		"RightPaneFaint":         th.RightPaneFaint,
-		"ListPaneBorder":         th.ListPaneBorder,
-		"StatusBar":              th.StatusBar,
-		"StatusBarError":         th.StatusBarError,
-		"StatusBarFaint":         th.StatusBarFaint,
-	} {
-		if s == nil {
-			t.Errorf("defaultTheme() field %s is nil", name)
-		}
-	}
-}
+
