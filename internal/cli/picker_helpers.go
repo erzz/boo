@@ -83,9 +83,9 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 			if err != nil {
 				return err
 			}
-		// We're inside the alt-screen — executeDelete writes nothing; non-fatal
-		// side-effect failures come back as []string warnings.
-		var innerErr error
+			// We're inside the alt-screen — executeDelete writes nothing; non-fatal
+			// side-effect failures come back as []string warnings.
+			var innerErr error
 			warns, innerErr = executeDelete(ctx, a, freshReg, p, purge)
 			return innerErr
 		})
@@ -161,6 +161,7 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		PreviewTemplate:       templatePreviewer(a),
 		PreviewProjectFactory: func(thm picker.Theme) func(string) string { return projectPreviewer(ctx, a, thm) },
 		LayoutNames:           templateNames(a),
+		ResolveLayout:         layoutResolver(a),
 		Theme:                 themeName,
 		ThemesDir:             a.Paths.ThemesDir,
 		ConfigPath:            a.Paths.ConfigFile,
@@ -349,6 +350,31 @@ func templateNames(a *app) []string {
 		return nil
 	}
 	return names
+}
+
+// layoutResolver returns a picker.Options.ResolveLayout callback that
+// materialises a layout template into a fresh, owned *layout.Layout the
+// in-picker editor can mutate. Each call re-parses the YAML so the editor
+// can never leak edits across invocations. Returns (nil, nil) for a blank
+// template (caller falls through to the default flow without opening the
+// editor); for a non-empty but unresolvable template it returns the
+// underlying error and the picker logs + falls through.
+func layoutResolver(a *app) func(template string) (*layout.Layout, error) {
+	return func(template string) (*layout.Layout, error) {
+		template = strings.TrimSpace(template)
+		if template == "" {
+			return nil, nil
+		}
+		r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, template)
+		if err != nil {
+			return nil, err
+		}
+		l := r.Layout
+		if l.Name == "" {
+			l.Name = template
+		}
+		return &l, nil
+	}
 }
 
 // pickerTheme resolves the active picker theme from the app's config.

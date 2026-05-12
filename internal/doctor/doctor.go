@@ -192,7 +192,8 @@ func previousFailed(prior []Result, names ...string) bool {
 }
 
 // previousResult returns the result for a named prior check, if any.
-func previousResult(prior []Result, name string) (Result, bool) {	for _, r := range prior {
+func previousResult(prior []Result, name string) (Result, bool) {
+	for _, r := range prior {
 		if r.Name == name {
 			return r, true
 		}

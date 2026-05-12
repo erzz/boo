@@ -67,6 +67,82 @@ func RenderLayout(l layout.Layout, width int) string {
 	return strings.Join(blocks, "\n\n")
 }
 
+// Region describes a single rectangle in a rendered tab, in cell coordinates
+// relative to the rendered string's top-left. Exactly one of LeafIndex /
+// NodeIndex is >= 0; the other is -1. Used by the picker's layout editor to
+// overlay highlights on the renderer's plain-ASCII output without coupling
+// the renderer to a TUI styling library.
+type Region struct {
+	LeafIndex int // -1 if this Region describes an interior node
+	NodeIndex int // -1 if this Region describes a leaf
+	X, Y      int
+	W, H      int
+}
+
+// RenderTabAnnotated renders a single tab and returns both the painted string
+// and a slice of Regions describing every leaf and interior node in DFS order.
+// Region geometry exactly matches what drawSplit painted. Callers can use
+// LeafIndex / NodeIndex to map regions back to layout.LeafPointers /
+// layout.InteriorPointers indices.
+func RenderTabAnnotated(t layout.Tab, width, height int) (string, []Region) {
+	if width < MinLeafWidth {
+		width = MinLeafWidth
+	}
+	if height < MinLeafHeight {
+		height = MinLeafHeight
+	}
+	out := RenderTab(t, width, height)
+	var regions []Region
+	walkRegions(t.Root, 0, 0, width, height, &regions, new(int), new(int))
+	return out, regions
+}
+
+// walkRegions mirrors drawSplit's geometry exactly to record each node's
+// rectangle. It MUST stay in lockstep with drawSplit — if drawSplit's
+// allocation strategy changes (sized splits, padding, etc.), this walker
+// changes the same way. leafCounter and nodeCounter are shared DFS counters
+// so indices match layout.LeafPointers / layout.InteriorPointers ordering.
+func walkRegions(s layout.Split, x, y, w, h int, out *[]Region, leafCounter, nodeCounter *int) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	if s.IsLeaf() {
+		*out = append(*out, Region{LeafIndex: *leafCounter, NodeIndex: -1, X: x, Y: y, W: w, H: h})
+		*leafCounter++
+		return
+	}
+	n := len(s.Children)
+	*out = append(*out, Region{LeafIndex: -1, NodeIndex: *nodeCounter, X: x, Y: y, W: w, H: h})
+	*nodeCounter++
+	if n < 2 {
+		if n == 1 {
+			walkRegions(s.Children[0], x, y, w, h, out, leafCounter, nodeCounter)
+		}
+		return
+	}
+	if s.Direction == layout.DirColumn {
+		offsets := allocateSized(h, n, s.Size)
+		for i, child := range s.Children {
+			yi := y + offsets[i]
+			hi := offsets[i+1] - offsets[i] + 1
+			if i == n-1 {
+				hi = (y + h) - yi
+			}
+			walkRegions(child, x, yi, w, hi, out, leafCounter, nodeCounter)
+		}
+		return
+	}
+	offsets := allocateSized(w, n, s.Size)
+	for i, child := range s.Children {
+		xi := x + offsets[i]
+		wi := offsets[i+1] - offsets[i] + 1
+		if i == n-1 {
+			wi = (x + w) - xi
+		}
+		walkRegions(child, xi, y, wi, h, out, leafCounter, nodeCounter)
+	}
+}
+
 // tabHeight returns a tab's required height in rows, based on column-depth
 // (max vertically-stacked leaves on any root→leaf path) × MinLeafHeight.
 func tabHeight(t layout.Tab) int {
@@ -125,7 +201,7 @@ func drawSplit(grid [][]rune, s layout.Split, x, y, w, h int) {
 
 	if s.Direction == layout.DirColumn {
 		// Stack children vertically; consecutive children overlap by 1 row so horizontal borders coalesce.
-		offsets := allocate(h, n)
+		offsets := allocateSized(h, n, s.Size)
 		for i, child := range s.Children {
 			yi := y + offsets[i]
 			hi := offsets[i+1] - offsets[i] + 1 // +1 for the shared border row
@@ -139,7 +215,7 @@ func drawSplit(grid [][]rune, s layout.Split, x, y, w, h int) {
 	}
 
 	// Row (default).
-	offsets := allocate(w, n)
+	offsets := allocateSized(w, n, s.Size)
 	for i, child := range s.Children {
 		xi := x + offsets[i]
 		wi := offsets[i+1] - offsets[i] + 1
@@ -148,6 +224,24 @@ func drawSplit(grid [][]rune, s layout.Split, x, y, w, h int) {
 		}
 		drawSplit(grid, child, xi, y, wi, h)
 	}
+}
+
+// allocateSized returns cumulative offsets honoring `size` (fraction for child 0)
+// when n==2 and size is in (0,1). Otherwise it falls back to even allocation.
+// Floors the first child at 3 cells so leaf borders still render.
+func allocateSized(L, n int, size float64) []int {
+	if n != 2 || size <= 0 || size >= 1 {
+		return allocate(L, n)
+	}
+	first := int(float64(L)*size + 0.5)
+	const minCells = 3
+	if first < minCells {
+		first = minCells
+	}
+	if first > L-minCells {
+		first = L - minCells
+	}
+	return []int{0, first, L}
 }
 
 // allocate divides span L into n+1 cumulative offsets, distributing leftover

@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/erzz/boo/internal/config"
+	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/picker"
+	"github.com/erzz/boo/internal/project"
 )
 
 func TestRepoNameFromRemoteURL(t *testing.T) {
@@ -243,3 +247,93 @@ func TestBuildNewProjectDefaults_NonCloneFlow_UsesCwd(t *testing.T) {
 	}
 }
 
+// TestRunCreateProject_RegistryLayoutKeyIsTemplateNotLayoutName: regression
+// for the M3 invariant. The registry's `Project.Layout` field must store the
+// template lookup key submitted by the user — NOT the resolved layout's
+// internal `name:` (which can differ). If we wrote `l.Name`, a template file
+// whose internal name diverges from its filename key would yield a
+// non-resolvable `Project.Layout`, breaking `loadOrRegenerateLayout`.
+func TestRunCreateProject_RegistryLayoutKeyIsTemplateNotLayoutName(t *testing.T) {
+	a := makeAppForCmds(t)
+	a.Config = config.DefaultConfig()
+	// User template keyed as "mytemplate.yaml" but with a different internal name.
+	tmplPath := filepath.Join(a.Paths.LayoutsDir, "mytemplate.yaml")
+	body := []byte("name: divergent-internal-name\ntabs:\n  - split:\n      cwd: \"\"\n")
+	if err := os.WriteFile(tmplPath, body, 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	intent := picker.NewProjectIntent{
+		Name:     "regproj",
+		Dir:      t.TempDir(),
+		Template: "mytemplate",
+	}
+	var out bytes.Buffer
+	// switchToProject is best-effort with the all-nil fake; ignore its error.
+	// The registry write happens before the switch attempt, so the row exists either way.
+	_ = runCreateProject(context.Background(), a, intent, &out)
+
+	reg, err := project.Load(a.Paths)
+	if err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	p, err := reg.Get("regproj")
+	if err != nil {
+		t.Fatalf("Get regproj: %v", err)
+	}
+	if p.Layout != "mytemplate" {
+		t.Errorf("Project.Layout = %q, want %q (must be the lookup key, not the layout struct's internal name)", p.Layout, "mytemplate")
+	}
+}
+
+// TestRunCreateProject_MaterialisedLayoutPersistsAndKeepsTemplateKey: when the
+// editor produced a customised tree, it must be written to the project's own
+// layout.yaml AND `Project.Layout` must remain the original template key.
+func TestRunCreateProject_MaterialisedLayoutPersistsAndKeepsTemplateKey(t *testing.T) {
+	a := makeAppForCmds(t)
+	a.Config = config.DefaultConfig()
+
+	// Resolve "triple" then mutate one leaf's Command — simulating the editor's apply path.
+	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, "triple")
+	if err != nil {
+		t.Fatalf("resolve triple: %v", err)
+	}
+	mat := resolved.Layout
+	leaves := layout.LeafPointers(&mat.Tabs[0].Root)
+	if len(leaves) == 0 {
+		t.Fatalf("triple has no leaves")
+	}
+	leaves[0].Command = "echo customised"
+
+	intent := picker.NewProjectIntent{
+		Name:               "matproj",
+		Dir:                t.TempDir(),
+		Template:           "triple",
+		MaterialisedLayout: &mat,
+	}
+	var out bytes.Buffer
+	_ = runCreateProject(context.Background(), a, intent, &out)
+
+	// 1. Registry: Layout stays the template key.
+	reg, err := project.Load(a.Paths)
+	if err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	p, err := reg.Get("matproj")
+	if err != nil {
+		t.Fatalf("Get matproj: %v", err)
+	}
+	if p.Layout != "triple" {
+		t.Errorf("Project.Layout = %q, want %q (template key must survive materialisation)", p.Layout, "triple")
+	}
+
+	// 2. On-disk layout.yaml carries the customisation.
+	got, err := project.LoadLayout(a.Paths, "matproj")
+	if err != nil {
+		t.Fatalf("LoadLayout: %v", err)
+	}
+	gotLeaves := layout.LeafPointers(&got.Tabs[0].Root)
+	if len(gotLeaves) == 0 || gotLeaves[0].Command != "echo customised" {
+		t.Errorf("persisted layout did not retain custom command; first leaf = %+v", gotLeaves[0])
+	}
+}

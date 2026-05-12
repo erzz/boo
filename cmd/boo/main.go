@@ -23,7 +23,7 @@ func main() {
 	defer stop()
 
 	root := cli.NewRoot(version, commit, date)
-		if err := root.ExecuteContext(ctx); err != nil {
-			os.Exit(1)
-		}
+	if err := root.ExecuteContext(ctx); err != nil {
+		os.Exit(1)
+	}
 }

@@ -16,7 +16,8 @@
 //
 //   leaf:     { "workingDirectory": "...", "env": {...},
 //               "initialInput": "..." }
-//   interior: { "direction": "row"|"column", "children": [<split>, <split>] }
+//   interior: { "direction": "row"|"column", "children": [<split>, <split>],
+//               "size": <0..1 fraction for first child, optional> }
 //
 // Interior nodes always have exactly 2 children — Ghostty's `split` command
 // halves a pane and there's no way to ask for a 3-way equal split, so the
@@ -34,6 +35,20 @@
 //       2. Recurse into a with `term`. (Any further splits inside a only
 //          subdivide the left/top half — t2 is untouched.)
 //       3. Recurse into b with `t2`.
+//
+// After all tabs are rendered and all inputs are flushed, an OPTIONAL resize
+// pass honors any `size` fields:
+//
+//   - Probes the window's pixel bounds via `win.bounds` (Cocoa NSWindow
+//     scripting). If unavailable, falls back to a hard-coded approximation
+//     so the feature degrades gracefully rather than failing.
+//   - For each interior node with `size`, focuses the leftmost-leaf of the
+//     SECOND child (b above) and issues `perform action "resize_split:<dir>,N"`
+//     where N is computed from `size`, the parent extent in pixels, and the
+//     current 50/50 division created by `app.split`.
+//   - Walks tree in DFS pre-order so outer dividers move before inner ones;
+//     this prevents the cumulative-fraction math from being invalidated by
+//     a not-yet-applied outer resize.
 //
 // Returns {"windowId": "..."} on success, {"error": "..."} on failure. On
 // any failure after the window has been created, the JXA helper attempts to
@@ -127,10 +142,31 @@
       }
     }
 
+    // pendingResizes collects { node, term, dir } records for the post-render
+    // resize pass. We can't compute pixel deltas during render() because we
+    // don't have window bounds yet (the new window may still be laying out).
+    // Walk order is DFS pre-order so the outermost dividers come first when
+    // applied later — see top-of-file notes for why outer-first matters.
+    const pendingResizes = [];
+
+    function recordResize(node, secondChildLeafTerm) {
+      if (!node || !node.direction || typeof node.size !== "number") return;
+      if (node.size <= 0 || node.size >= 1) return;
+      // Direction of the resize_split action: move the SECOND child's near
+      // edge in the OPPOSITE direction of the split. row → second child's
+      // left edge moves; column → second child's top edge moves. Positive
+      // delta from ResizeDeltaPixels means "grow first child"; we map that
+      // to "move second child's near edge AWAY from the first child", which
+      // is `left` for row and `up` for column.
+      const action = node.direction === "row" ? "left" : "up";
+      pendingResizes.push({ node: node, term: secondChildLeafTerm, action: action });
+    }
+
     // render walks the tree as described in the file header. As it
     // visits each leaf, it stages that leaf's initialInput against the
     // terminal that materialises it, so flushInputs() can replay the
-    // keystrokes once everything is alive.
+    // keystrokes once everything is alive. As it visits each interior
+    // node, it stages a resize for flushResizes() to apply.
     function render(node, term) {
       if (isLeaf(node)) {
         recordInput(node, term);
@@ -146,6 +182,9 @@
       // leaf config. After this, `term` is left/top half, `t2` is
       // right/bottom half.
       const t2 = app.split(term, { direction: dir, withConfiguration: buildCfg(leftmostLeaf(right)) });
+      // Record the resize (if any) BEFORE recursing — DFS pre-order on
+      // interior nodes is what flushResizes() expects.
+      recordResize(node, t2);
       render(left, term);
       render(right, t2);
     }
@@ -162,8 +201,128 @@
       }
     }
 
+    // windowExtent returns the window's pixel width or height for the given
+    // axis ("row" or "column"). Falls back to a fixed default if bounds is
+    // unavailable. The fallback values are deliberately conservative so a
+    // missing-bounds environment still produces a visible (if imprecise)
+    // resize rather than silently dropping the feature.
+    function windowExtent(win, axis) {
+      const fallback = axis === "row" ? 1200 : 800;
+      try {
+        const b = win.bounds();
+        if (b && typeof b.width === "number" && typeof b.height === "number") {
+          return axis === "row" ? Math.round(b.width) : Math.round(b.height);
+        }
+      } catch (_) { /* fall through */ }
+      return fallback;
+    }
+
+    // computeDeltaPx mirrors Go's ghostty.ResizeDeltaPixels — keep in sync.
+    // Returns the absolute |delta| in pixels and a flipped flag indicating
+    // whether the sign was negative (caller picks an opposite action).
+    function computeDeltaPx(parentExtentPx, targetFrac) {
+      if (targetFrac <= 0 || targetFrac >= 1) return { abs: 0, flipped: false };
+      if (parentExtentPx <= 0) return { abs: 0, flipped: false };
+      const delta = (targetFrac - 0.5) * parentExtentPx;
+      const rounded = delta >= 0 ? Math.round(delta) : -Math.round(-delta);
+      if (rounded === 0) return { abs: 0, flipped: false };
+      return { abs: Math.abs(rounded), flipped: rounded < 0 };
+    }
+
+    // flippedAction returns the opposite of `action` along its axis.
+    // left ↔ right, up ↔ down.
+    function flippedAction(action) {
+      switch (action) {
+        case "left": return "right";
+        case "right": return "left";
+        case "up": return "down";
+        case "down": return "up";
+      }
+      return action;
+    }
+
+    // flushResizes applies every staged resize_split. Per-node parent extent
+    // is computed by walking from the tab root to the node, multiplying the
+    // window dimension by each ancestor's size on the matching axis (or 0.5
+    // when an ancestor has no size). DFS pre-order on pendingResizes means
+    // outer dividers move first, but the math here doesn't actually depend
+    // on that — the cumulative-product is over PLANNED sizes, which is the
+    // post-resize geometry by construction. The pre-order is still preferred
+    // because it minimises visual flicker.
+    function flushResizes(win, tabRoots) {
+      if (pendingResizes.length === 0) return;
+
+      // Build a node→ancestors map per tab. Cheaper than re-walking for
+      // each resize; resizes can be many in a deeply-nested layout.
+      const ancestors = new Map();
+      function indexTree(node, chain) {
+        if (!node || isLeaf(node)) return;
+        ancestors.set(node, chain);
+        const childChain = chain.concat([node]);
+        for (let i = 0; i < node.children.length; i++) {
+          indexTree(node.children[i], childChain);
+        }
+      }
+      for (let i = 0; i < tabRoots.length; i++) indexTree(tabRoots[i], []);
+
+      const widthPx = windowExtent(win, "row");
+      const heightPx = windowExtent(win, "column");
+
+      for (let i = 0; i < pendingResizes.length; i++) {
+        const p = pendingResizes[i];
+        const baseExtent = p.node.direction === "row" ? widthPx : heightPx;
+        let extent = baseExtent;
+        const chain = ancestors.get(p.node) || [];
+        for (let j = 0; j < chain.length; j++) {
+          const a = chain[j];
+          // Determine which axis this ancestor cuts along, then which
+          // child of the ancestor contains our node, then scale extent
+          // by the corresponding fraction. We only shrink extent when
+          // the ancestor's axis matches the node's axis OR when the
+          // ancestor's axis is irrelevant — actually we always scale,
+          // because either axis halves the bounding box for the next
+          // level. Easier: every ancestor halves the bounding box (or
+          // size/1-size cuts it) on its own axis; on the OTHER axis the
+          // bounding box is unchanged. So scale only when ancestor.axis
+          // == node.axis is wrong — we need to scale on whichever axis
+          // matches our node's chosen extent (row→width, column→height).
+          const node = p.node;
+          if (axisMatches(a, node)) {
+            const frac = childFraction(a, chain[j + 1] || node);
+            extent = Math.round(extent * frac);
+          }
+        }
+        const d = computeDeltaPx(extent, p.node.size);
+        if (d.abs === 0) continue;
+        const action = d.flipped ? flippedAction(p.action) : p.action;
+        const cmd = "resize_split:" + action + "," + d.abs;
+        try {
+          app.perform(cmd, { on: p.term });
+        } catch (_) { /* best-effort: a single failed resize shouldn't sink the open */ }
+      }
+    }
+
+    // axisMatches reports whether ancestor `a` cuts along the same axis
+    // (row vs column) as the node we're computing extent for.
+    function axisMatches(ancestor, node) {
+      return ancestor.direction === node.direction;
+    }
+
+    // childFraction returns the fraction of `ancestor`'s extent that
+    // `child` occupies. Uses ancestor.size when set, defaulting to 0.5.
+    // child is either ancestor.children[0] (fraction = size) or
+    // ancestor.children[1] (fraction = 1-size). If the relationship is
+    // unclear (shouldn't happen), defaults to 0.5.
+    function childFraction(ancestor, child) {
+      const sz = (typeof ancestor.size === "number" && ancestor.size > 0 && ancestor.size < 1) ? ancestor.size : 0.5;
+      if (ancestor.children[0] === child) return sz;
+      if (ancestor.children[1] === child) return 1 - sz;
+      return 0.5;
+    }
+
     let win;
     let windowId;
+    const tabRoots = [];
     try {
       // 1. Window seeded by the leftmost leaf of the first tab's root.
       const firstTab = tabs[0];
@@ -176,6 +335,7 @@
       // 2. Render the first tab's split tree into the seed terminal.
       const firstSeed = win.tabs[0].focusedTerminal();
       render(firstTab.root, firstSeed);
+      tabRoots.push(firstTab.root);
 
       // NOTE on tab.name: Ghostty 1.3.x marks `tab.name` and `terminal.name`
       // as read-only in its AppleScript dictionary. Tab titles are derived
@@ -198,12 +358,18 @@
         app.newTab({ in: win, withConfiguration: buildCfg(leftmostLeaf(tab.root)) });
         const seed = win.tabs[t].focusedTerminal();
         render(tab.root, seed);
+        tabRoots.push(tab.root);
       }
 
       // 4. All terminals exist; replay each leaf's initialInput as a
       //    paste-style input into its terminal. Done last so every
       //    shell has had time to start before we type into it.
       flushInputs();
+
+      // 5. Apply any size hints via the resize_split action. Best-effort:
+      //    a failure here doesn't undo the window, since the layout is
+      //    already structurally correct — it just has 50/50 splits.
+      flushResizes(win, tabRoots);
 
       return JSON.stringify({ windowId: windowId });
     } catch (inner) {

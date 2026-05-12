@@ -204,3 +204,85 @@ func TestRenderTab_DefaultsBelowMinimums(t *testing.T) {
 		t.Errorf("width not bumped to MinLeafWidth: got width %d", len(lines[0]))
 	}
 }
+
+// TestRenderTabAnnotated_RegionsMatchPainted geometry: every Region in the
+// returned slice corresponds to either a leaf or an interior node, and its
+// rectangle exactly matches what drawSplit painted. This is the contract the
+// picker leans on to overlay highlights — drift would mis-paint the cursor.
+func TestRenderTabAnnotated_RegionsMatchPainted(t *testing.T) {
+	// triple: row( leaf, column(leaf, leaf) ) → 3 leaves, 2 interior nodes.
+	tab := layout.Tab{Root: rowOf(leaf(), colOf(leaf(), leaf()))}
+	const w, h = 40, 8
+	_, regions := RenderTabAnnotated(tab, w, h)
+
+	var leaves, interior []Region
+	for _, r := range regions {
+		switch {
+		case r.LeafIndex >= 0:
+			leaves = append(leaves, r)
+		case r.NodeIndex >= 0:
+			interior = append(interior, r)
+		default:
+			t.Errorf("region has neither leaf nor node index: %+v", r)
+		}
+	}
+	if len(leaves) != 3 {
+		t.Fatalf("expected 3 leaf regions, got %d: %+v", len(leaves), leaves)
+	}
+	if len(interior) != 2 {
+		t.Fatalf("expected 2 interior regions, got %d: %+v", len(interior), interior)
+	}
+	// Indices ascend in DFS order.
+	for i, r := range leaves {
+		if r.LeafIndex != i {
+			t.Errorf("leaves[%d].LeafIndex = %d, want %d", i, r.LeafIndex, i)
+		}
+	}
+	for i, r := range interior {
+		if r.NodeIndex != i {
+			t.Errorf("interior[%d].NodeIndex = %d, want %d", i, r.NodeIndex, i)
+		}
+	}
+	// Outer node spans the whole tab.
+	root := interior[0]
+	if root.X != 0 || root.Y != 0 || root.W != w || root.H != h {
+		t.Errorf("root interior region should span the whole tab, got %+v", root)
+	}
+	// Leaf 0 is the left pane; its right edge meets the inner column's left edge.
+	left := leaves[0]
+	innerCol := interior[1]
+	if left.X+left.W != innerCol.X+1 {
+		// The +1 captures the shared 1-cell border with the right subtree.
+		t.Errorf("left leaf right edge (%d) and inner column left edge (%d) should share a border", left.X+left.W, innerCol.X)
+	}
+}
+
+// TestRenderTabAnnotated_HonorsSize: a sized row split makes the left leaf's
+// region wider than 50%. If this test fails, drawSplit and walkRegions have
+// drifted apart — that drift would make the picker's highlight overlay the
+// wrong rectangle.
+func TestRenderTabAnnotated_HonorsSize(t *testing.T) {
+	tab := layout.Tab{Root: layout.Split{
+		Direction: layout.DirRow,
+		Size:      0.75,
+		Children:  []layout.Split{leaf(), leaf()},
+	}}
+	const w, h = 40, 6
+	_, regions := RenderTabAnnotated(tab, w, h)
+	var leafRegions []Region
+	for _, r := range regions {
+		if r.LeafIndex >= 0 {
+			leafRegions = append(leafRegions, r)
+		}
+	}
+	if len(leafRegions) != 2 {
+		t.Fatalf("expected 2 leaves, got %d", len(leafRegions))
+	}
+	// At size=0.75, leaf 0 should occupy ~30 cells, leaf 1 ~10.
+	if leafRegions[0].W <= leafRegions[1].W {
+		t.Errorf("size=0.75 should make leaf 0 wider than leaf 1; got %d vs %d", leafRegions[0].W, leafRegions[1].W)
+	}
+	if leafRegions[0].W < 25 || leafRegions[0].W > 33 {
+		t.Errorf("leaf 0 width should be ~30 cells at size=0.75 in width=40; got %d", leafRegions[0].W)
+	}
+}

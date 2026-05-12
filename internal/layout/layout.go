@@ -50,6 +50,13 @@ type Split struct {
 	Direction string  `json:"direction,omitempty"`
 	Children  []Split `json:"children,omitempty"`
 
+	// Size is the fractional space for the FIRST child (0,1) of an interior
+	// node; the second child gets 1-Size. Optional; 0 (or omitted) means
+	// "split evenly". Honored by the preview renderer and the open-layout
+	// JXA resize pass. Only meaningful on interior nodes; the validator
+	// rejects it on leaves.
+	Size float64 `json:"size,omitempty"`
+
 	Cwd          string            `json:"cwd,omitempty"`
 	Command      string            `json:"command,omitempty"`
 	InitialInput string            `json:"initial_input,omitempty"`
@@ -138,7 +145,15 @@ func validateSplit(s Split, path string, depth int) error {
 
 	// Pure leaf: allow cwd-less leaves (inherit project dir, equivalent to `cwd: .`).
 	if !hasInterior {
+		if s.Size != 0 {
+			return fmt.Errorf("layout: %s: size is only valid on interior splits", path)
+		}
 		return nil
+	}
+
+	// Interior: direction must be valid, exactly 2 children, size in (0,1) when set.
+	if s.Size != 0 && (s.Size <= 0 || s.Size >= 1) {
+		return fmt.Errorf("layout: %s: size must be between 0 and 1 (exclusive), got %v", path, s.Size)
 	}
 
 	// Interior: direction must be valid, exactly 2 children.
@@ -164,4 +179,38 @@ func validDirection(d string) bool {
 	default:
 		return false
 	}
+}
+
+// LeafPointers returns pointers to every leaf in s in left-to-right DFS order.
+// This is the canonical leaf-ordering contract: same order the JXA walker
+// materialises panes, same order DescribeWindow returns terminals, same order
+// the save pipeline uses to align leaves across re-saves. Callers that need
+// to mutate a tree by leaf index (e.g. the picker's layout editor) should use
+// this; callers that only read should prefer the value-returning equivalents.
+func LeafPointers(s *Split) []*Split {
+	if s == nil {
+		return nil
+	}
+	if s.IsLeaf() {
+		return []*Split{s}
+	}
+	var out []*Split
+	for i := range s.Children {
+		out = append(out, LeafPointers(&s.Children[i])...)
+	}
+	return out
+}
+
+// InteriorPointers returns pointers to every interior node in s in DFS pre-order
+// (parent before children). Used by the layout editor's divider mode to cycle
+// through resizable nodes in a stable order. Empty for leaf-only trees.
+func InteriorPointers(s *Split) []*Split {
+	if s == nil || s.IsLeaf() {
+		return nil
+	}
+	out := []*Split{s}
+	for i := range s.Children {
+		out = append(out, InteriorPointers(&s.Children[i])...)
+	}
+	return out
 }

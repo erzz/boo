@@ -130,7 +130,8 @@ func itoa(i int) string {
 		n++
 	}
 	// Reverse.
-	for l, r := 0, n-1; l < r; l, r = l+1, r-1 {		buf[l], buf[r] = buf[r], buf[l]
+	for l, r := 0, n-1; l < r; l, r = l+1, r-1 {
+		buf[l], buf[r] = buf[r], buf[l]
 	}
 	return string(buf[:n])
 }

@@ -29,6 +29,12 @@ type keyMap struct {
 	Cancel  key.Binding // esc — back to list (or quit if formOnly)
 	Confirm key.Binding // s/enter on the AlreadyRegistered interstitial
 	Switch  key.Binding // c on the AlreadyRegistered interstitial
+
+	// Layout editor sub-screen.
+	LayoutEditCycleNext key.Binding // tab — cycle to next leaf
+	LayoutEditCyclePrev key.Binding // shift+tab — cycle to previous leaf
+	LayoutEditApply     key.Binding // ctrl+s — apply customisation, dispatch intent (enter would conflict with textinput)
+	LayoutEditBack      key.Binding // esc — discard edits, return to the form
 }
 
 // defaultKeyMap returns the production bindings. Function (not var) so tests get fresh copies.
@@ -89,6 +95,22 @@ func defaultKeyMap() keyMap {
 		Switch: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "continue (create new)"),
+		),
+		LayoutEditCycleNext: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "next pane"),
+		),
+		LayoutEditCyclePrev: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "prev pane"),
+		),
+		LayoutEditApply: key.NewBinding(
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("ctrl+s", "apply customisation"),
+		),
+		LayoutEditBack: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "back to form"),
 		),
 	}
 }

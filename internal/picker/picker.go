@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/erzz/boo/internal/config"
+	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/theme"
 )
 
@@ -78,11 +79,19 @@ type EditIntent struct {
 
 // NewProjectIntent — user submitted the new-project form. Non-empty From
 // means clone into Dir; otherwise Dir is an existing dir to register.
+//
+// MaterialisedLayout, when non-nil, overrides Template at registration
+// time: the CLI writes this layout to the project's own layout.yaml
+// instead of resolving Template from the templates dir. It's the
+// post-edit output of the in-picker layout editor (`screenLayoutEditor`).
+// The registry's `Layout` field still records the original Template
+// name so layout regeneration (`loadOrRegenerateLayout`) keeps working.
 type NewProjectIntent struct {
-	Name     string
-	Dir      string
-	From     string
-	Template string
+	Name               string
+	Dir                string
+	From               string
+	Template           string
+	MaterialisedLayout *layout.Layout
 }
 
 func (SwitchIntent) isIntent()     {}
@@ -155,6 +164,14 @@ type Options struct {
 	// OnLaunch, if set, runs the project launch as an async tea.Cmd while the picker stays
 	// alive. Must emit LaunchFinishedMsg on completion. nil = legacy quit-and-handoff.
 	OnLaunch func(name string) tea.Cmd
+
+	// ResolveLayout, if set, is called after the new-project form is submitted (with a
+	// non-empty Template) to materialise the chosen template into a *layout.Layout that
+	// the in-picker editor can mutate. nil = skip the editor entirely (form submit
+	// proceeds straight to NewProjectIntent dispatch, current behaviour). The callback
+	// must return a fresh, fully-owned tree on each call — the editor mutates it in
+	// place, so a cached/shared instance would leak edits across invocations.
+	ResolveLayout func(template string) (*layout.Layout, error)
 
 	// StartupWarning, if non-empty, is shown in the status bar on open.
 	StartupWarning string
@@ -254,6 +271,7 @@ func Run(items []Item, opts Options) (Result, error) {
 		onOpenLayout:          opts.OnOpenLayout,
 		onLaunch:              opts.OnLaunch,
 		refreshItems:          opts.RefreshItems,
+		resolveLayout:         opts.ResolveLayout,
 	}
 	if opts.StartupWarning != "" {
 		m.status = statusLine{text: opts.StartupWarning, isErr: true}
@@ -279,6 +297,7 @@ const (
 	screenAlreadyRegistered
 	screenConfirm
 	screenSetLayout
+	screenLayoutEditor
 	screenError
 )
 
@@ -350,12 +369,13 @@ type model struct {
 	// RefreshItems and re-renders the list. Failed callbacks return an
 	// error which the picker shows on a transient error screen until
 	// the user dismisses it with any key.
-	onDelete     func(name string, purge bool) (warnings []string, err error)
-	onSetLayout  func(name, template string) error
-	onEdit       func(oldName, newName, newDir, newTemplate string) error
-	onOpenLayout func(name string) tea.Cmd
-	onLaunch     func(name string) tea.Cmd
-	refreshItems func() ([]Item, error)
+	onDelete      func(name string, purge bool) (warnings []string, err error)
+	onSetLayout   func(name, template string) error
+	onEdit        func(oldName, newName, newDir, newTemplate string) error
+	onOpenLayout  func(name string) tea.Cmd
+	onLaunch      func(name string) tea.Cmd
+	refreshItems  func() ([]Item, error)
+	resolveLayout func(template string) (*layout.Layout, error)
 
 	intent    Intent // nil + cancelled=false should not happen; nil + cancelled=true means dismissed
 	cancelled bool
@@ -366,6 +386,17 @@ type model struct {
 	// setLayout is the set-layout sub-screen state, valid iff
 	// screen == screenSetLayout.
 	setLayout setLayoutModel
+
+	// layoutEditor is the new-project layout editor sub-screen state,
+	// valid iff screen == screenLayoutEditor. Reached after form submit
+	// when ResolveLayout is wired and the form's Template is non-empty.
+	layoutEditor layoutEditorModel
+
+	// pendingNewProject holds the form-submitted intent while the user
+	// is in the layout editor sub-screen. On editor confirm we attach
+	// the materialised layout (or not) and dispatch via runIntent.
+	// Non-nil iff screen == screenLayoutEditor.
+	pendingNewProject *NewProjectIntent
 
 	// errMsg is the message rendered on screenError. Cleared on
 	// dismissal.
@@ -403,11 +434,11 @@ const rightPaneWidth = 40
 
 // Layout overheads used by WindowSize math.
 const (
-	statusBarHeight    = 1  // vertical lines reserved for the bottom status bar
-	listBorderOverhead = 2  // top + bottom border of the list pane
-	listPaneInnerInset = 4  // list pane: left/right borders (2) + Padding(0,1) (2)
-	listMinInnerWidth  = 20 // floor for list inner content width
-	brandStripReserved = 4  // rows for the brand strip (3) + gap (1) above the list
+	statusBarHeight     = 1  // vertical lines reserved for the bottom status bar
+	listBorderOverhead  = 2  // top + bottom border of the list pane
+	listPaneInnerInset  = 4  // list pane: left/right borders (2) + Padding(0,1) (2)
+	listMinInnerWidth   = 20 // floor for list inner content width
+	brandStripReserved  = 4  // rows for the brand strip (3) + gap (1) above the list
 	brandStripMinHeight = 12 // inner list-pane height below which we suppress the strip
 )
 
@@ -610,6 +641,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateConfirm(msg)
 	case screenSetLayout:
 		return m.updateSetLayout(msg)
+	case screenLayoutEditor:
+		return m.updateLayoutEditor(msg)
 	case screenError:
 		return m.updateError(msg)
 	default:
@@ -677,20 +710,20 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 				}
-		case matches(m.keys.CycleTheme, pressed):
-			return m, m.cycleTheme()
-		case matches(m.keys.Select, pressed):
-			switch v := m.list.SelectedItem().(type) {
-			case Item:
-				if m.onLaunch != nil {
-					// Stay-alive launch: picker remains open while the project window opens.
-					m.status = statusLine{text: fmt.Sprintf("launching %s…", v.Key)}
-					return m, m.onLaunch(v.Key)
-				}
-				// Legacy quit-and-handoff path (selection-only callers).
-				m.intent = SwitchIntent{Name: v.Key}
-				return m, tea.Quit
-			case newProjectItem:
+			case matches(m.keys.CycleTheme, pressed):
+				return m, m.cycleTheme()
+			case matches(m.keys.Select, pressed):
+				switch v := m.list.SelectedItem().(type) {
+				case Item:
+					if m.onLaunch != nil {
+						// Stay-alive launch: picker remains open while the project window opens.
+						m.status = statusLine{text: fmt.Sprintf("launching %s…", v.Key)}
+						return m, m.onLaunch(v.Key)
+					}
+					// Legacy quit-and-handoff path (selection-only callers).
+					m.intent = SwitchIntent{Name: v.Key}
+					return m, tea.Quit
+				case newProjectItem:
 					if m.hideNewProject {
 						break
 					}
@@ -768,6 +801,17 @@ func (m *model) openSetLayout(it Item) bool {
 	m.setLayout = newSetLayoutModel(it.Key, it.Layout, m.layoutNames, m.previewTemplate)
 	m.screen = screenSetLayout
 	return true
+}
+
+// openLayoutEditor stashes the form-submitted intent and transitions to the
+// layout editor sub-screen with the resolved layout. The editor's ctrl+s/esc
+// handlers fish the intent back out, attach (or skip) the materialised layout,
+// and finally call runIntent.
+func (m *model) openLayoutEditor(intent NewProjectIntent, lay *layout.Layout) {
+	pending := intent
+	m.pendingNewProject = &pending
+	m.layoutEditor = newLayoutEditorModel(intent.Name, intent.Template, lay)
+	m.screen = screenLayoutEditor
 }
 
 // updateConfirm handles y/n on the active confirm modal. Confirm dispatches
@@ -1009,6 +1053,21 @@ func (m *model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if submitted {
+		// New-project submits with a non-empty template AND a wired ResolveLayout
+		// detour through the layout editor sub-screen instead of dispatching
+		// straight away. Edit intents and template-less / unresolved cases keep
+		// the original behaviour. Resolution failure is logged and falls through
+		// — the editor is a polish path, not load-bearing for project creation.
+		if np, ok := intent.(NewProjectIntent); ok && np.Template != "" && m.resolveLayout != nil {
+			lay, err := m.resolveLayout(np.Template)
+			if err != nil {
+				slog.Warn("picker: resolve layout for editor failed, skipping editor",
+					"template", np.Template, "err", err)
+			} else if lay != nil {
+				m.openLayoutEditor(np, lay)
+				return m, nil
+			}
+		}
 		// Dispatch through runIntent: edit intents run in-loop; NewProjectIntent exits the TUI.
 		return m.runIntent(intent)
 	}
@@ -1045,6 +1104,8 @@ func (m *model) View() string {
 		raw = m.confirm.view(m.theme, m.width, m.height)
 	case screenSetLayout:
 		raw = m.setLayout.view(m.theme)
+	case screenLayoutEditor:
+		raw = m.layoutEditor.view(m.theme, m.width)
 	case screenError:
 		raw = m.viewError()
 	default:

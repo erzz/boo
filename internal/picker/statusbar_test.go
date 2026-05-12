@@ -132,7 +132,8 @@ func TestSplit_ShortTerminalCollapses(t *testing.T) {
 }
 
 // TestSplit_HeightAtThreshold: height=24 is the floor for split mode.
-func TestSplit_HeightAtThreshold(t *testing.T) {	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
+func TestSplit_HeightAtThreshold(t *testing.T) {
+	m := newTestModel(Item{Key: "alpha", Title: "alpha"})
 	m.theme = defaultTheme()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 	mm := updated.(*model)

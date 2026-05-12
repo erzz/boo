@@ -21,5 +21,3 @@ func TestThemeByName_UnknownFallsBackSilently(t *testing.T) {
 		t.Error("fallback theme returned empty render for non-empty input")
 	}
 }
-
-
