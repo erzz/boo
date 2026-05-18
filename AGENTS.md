@@ -69,6 +69,7 @@ make fmt         # gofmt + goimports
 - Default layout template is `triple` (1 large left pane, 2 stacked on the right). Single source of truth: `picker/form.go`'s `mk("triple", ...)` calls. Upstream callers leave `Template: ""` and let `ResolveTemplate("","")` and the form fall through to `triple`.
 - The new-project form's Layout field is a **cycler** (←/→ or h/l), not free text — closed enum, closed-enum widget.
 - Bare `boo` always lands on the project list. The "this directory is already registered" interstitial only fires for `formOnly` flows (`boo new` / `boo save` fallback).
+- The new-project form opens the **layout editor** on submit (`internal/picker/layout_editor.go`). It opens in **LAYOUT mode** (move dividers, select panes); `c` enters COMMAND mode for the focused leaf, `enter`/`esc` commits and returns. Apply is `ctrl+s` (not `enter` — would collide with the textinput). Split proportions live on interior nodes as `Split.Size` (first child's fractional share, `(0,1)` exclusive; `0`/omitempty = even).
 
 ## Gotchas
 

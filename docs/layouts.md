@@ -42,6 +42,11 @@ tabs:
     root:
       direction: row          # Interior: split horizontally (left | right).
                               # "column" splits vertically (top | bottom).
+      size: 0.4               # Optional. First child's fractional share of
+                              # this split's extent (0,1) — here the left
+                              # pane gets 40%, the right 60%. Omit (or set
+                              # to 0) for an even split. Honored by both
+                              # the preview renderer and the live window.
       children:
         - cwd: .              # Left child (leaf).
         - direction: column   # Right child (interior).
@@ -62,6 +67,9 @@ tabs:
   not equal thirds. To get N panes, nest interiors.
 - Interior `direction` is `row` (left/right) or `column` (top/bottom).
 - Direction never appears on a leaf.
+- Optional `size` on an interior node is a float strictly between 0 and
+  1 — the first child's fractional share. Omit (or set to 0) for an
+  even split. Never appears on a leaf.
 
 ### Tab names
 
