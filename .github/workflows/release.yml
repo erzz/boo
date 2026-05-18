@@ -1,8 +1,10 @@
 name: Release
 
+# Manual-only. Cutting a release is a deliberate act, not a side effect of
+# merging to main. Trigger from the Actions tab ("Run workflow") when you're
+# ready to ship whatever has accumulated on main since the last tag.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,7 +15,6 @@ jobs:
   release:
     name: semantic-release
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, 'chore(release)')"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -33,4 +34,8 @@ jobs:
             @semantic-release/github
             conventional-changelog-conventionalcommits
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # MUST be a PAT, not the default GITHUB_TOKEN. Tags pushed using
+          # GITHUB_TOKEN do not trigger downstream workflows (GitHub safeguard
+          # against recursive CI), which would mean goreleaser.yml never runs
+          # and the Homebrew formula never updates. See docs/RELEASING.md.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
