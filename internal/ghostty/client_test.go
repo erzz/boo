@@ -143,3 +143,18 @@ func TestOpenLayout_PropagatesScriptError(t *testing.T) {
 		t.Fatalf("expected propagated error, got %v", err)
 	}
 }
+
+// TestOpenLayoutScript_UsesPerformActionNotPerform pins the JXA spelling for
+// the "perform action" sdef command. AppleScript's "perform action" maps to
+// JXA's `performAction(...)`. Using `app.perform(...)` silently dispatches
+// to a generic Cocoa selector that returns "Message not understood." at
+// runtime — symptom: dividers don't move and the failure is swallowed by
+// flushResizes's best-effort catch. Regression guard.
+func TestOpenLayoutScript_UsesPerformActionNotPerform(t *testing.T) {
+	if strings.Contains(openLayoutScript, "app.perform(") {
+		t.Fatal("open_layout.js uses `app.perform(`; must be `app.performAction(` — the sdef command is `perform action`, which JXA exposes as performAction. Using `perform` triggers a silent `Message not understood` from Cocoa and dividers never move.")
+	}
+	if !strings.Contains(openLayoutScript, "app.performAction(") {
+		t.Fatal("open_layout.js no longer calls `app.performAction(`; the resize_split pass is dead code.")
+	}
+}

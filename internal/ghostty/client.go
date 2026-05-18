@@ -219,10 +219,16 @@ func (c *Client) FocusWindow(ctx context.Context, windowID string) error {
 // an interior node (Direction="row"|"column", non-empty Children).
 // command and initial_input from YAML are collapsed into a single InitialInput
 // string on the wire — see switch.go::splitToParams for the reasoning.
+//
+// Size is an optional fraction in (0,1) for the FIRST child of an interior
+// node. Zero/omitted means "split evenly" (Ghostty's default after split).
+// Honored by the JXA resize pass via Ghostty's `resize_split` action; see
+// the resize walker in open_layout.js for the per-node pixel-delta logic.
 type LayoutSplit struct {
 	// Interior fields.
 	Direction string        `json:"direction,omitempty"`
 	Children  []LayoutSplit `json:"children,omitempty"`
+	Size      float64       `json:"size,omitempty"`
 
 	// Leaf fields.
 	WorkingDirectory string            `json:"workingDirectory,omitempty"`
@@ -367,7 +373,8 @@ func IsNotRunning(err error) bool {
 // Idempotent: if Ghostty is already up, returns immediately after a quick probe.
 func (c *Client) EnsureRunning(ctx context.Context) error {
 	// Fast path: already responsive.
-	if _, err := c.Version(ctx); err == nil {		return nil
+	if _, err := c.Version(ctx); err == nil {
+		return nil
 	} else if !IsNotRunning(err) {
 		// Some other error (e.g. permissions); surface it.
 		return err

@@ -29,6 +29,17 @@ type keyMap struct {
 	Cancel  key.Binding // esc — back to list (or quit if formOnly)
 	Confirm key.Binding // s/enter on the AlreadyRegistered interstitial
 	Switch  key.Binding // c on the AlreadyRegistered interstitial
+
+	// Layout editor sub-screen.
+	LayoutEditCycleNext    key.Binding // tab — cycle to next leaf / divider
+	LayoutEditCyclePrev    key.Binding // shift+tab — cycle to previous leaf / divider
+	LayoutEditApply        key.Binding // ctrl+s — apply customisation, dispatch intent (enter would conflict with textinput)
+	LayoutEditBack         key.Binding // esc — discard edits, return to the form (LAYOUT mode only; in COMMAND mode esc exits the textinput)
+	LayoutEditEnterCommand key.Binding // c — switch from LAYOUT mode into COMMAND mode (textinput focused)
+	LayoutEditExitCommand  key.Binding // enter / esc — commit textinput and return to LAYOUT mode (COMMAND mode only)
+	LayoutEditSizeIncr     key.Binding // + / = — increase first child's share by 5% (LAYOUT mode)
+	LayoutEditSizeDecr     key.Binding // - / _ — decrease first child's share by 5% (LAYOUT mode)
+	LayoutEditSizeReset    key.Binding // 0 — reset divider to "split evenly" (LAYOUT mode)
 }
 
 // defaultKeyMap returns the production bindings. Function (not var) so tests get fresh copies.
@@ -89,6 +100,50 @@ func defaultKeyMap() keyMap {
 		Switch: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "continue (create new)"),
+		),
+		LayoutEditCycleNext: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "next pane"),
+		),
+		LayoutEditCyclePrev: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "prev pane"),
+		),
+		LayoutEditApply: key.NewBinding(
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("ctrl+s", "apply customisation"),
+		),
+		LayoutEditBack: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "back to form"),
+		),
+		LayoutEditEnterCommand: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "command mode"),
+		),
+		LayoutEditExitCommand: key.NewBinding(
+			// enter and esc both commit the typed command and return to LAYOUT
+			// mode. esc here shadows LayoutEditBack — Update routes esc to
+			// exit-command first when in command mode, then to back-to-form
+			// when in layout mode.
+			key.WithKeys("enter", "esc"),
+			key.WithHelp("enter/esc", "done editing"),
+		),
+		LayoutEditSizeIncr: key.NewBinding(
+			// "=" is the same physical key as "+" on US layouts and avoids a
+			// shift requirement; non-US layouts that produce "+" without shift
+			// also work via the canonical "+" entry.
+			key.WithKeys("+", "="),
+			key.WithHelp("+", "grow first child"),
+		),
+		LayoutEditSizeDecr: key.NewBinding(
+			// "_" is shift+"-" on US; both produce useful keysyms across layouts.
+			key.WithKeys("-", "_"),
+			key.WithHelp("-", "shrink first child"),
+		),
+		LayoutEditSizeReset: key.NewBinding(
+			key.WithKeys("0"),
+			key.WithHelp("0", "split evenly"),
 		),
 	}
 }

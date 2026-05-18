@@ -62,8 +62,8 @@ flags act as form pre-population and the user can edit before submitting.`,
 				}
 			}
 
-		// Build form defaults from flags + cwd inspection. Flags always win.
-		defs, err := buildNewProjectDefaults(a, defaultsFromFlags{
+			// Build form defaults from flags + cwd inspection. Flags always win.
+			defs, err := buildNewProjectDefaults(a, defaultsFromFlags{
 				name:     firstArg(args),
 				dir:      existing,
 				from:     fromURL,
@@ -74,8 +74,8 @@ flags act as form pre-population and the user can edit before submitting.`,
 				return err
 			}
 
-		// --yes is the non-interactive escape hatch. Error if anything required is missing.
-		if yes {
+			// --yes is the non-interactive escape hatch. Error if anything required is missing.
+			if yes {
 				intent := defaultsToIntent(defs)
 				if err := validateIntent(intent); err != nil {
 					return fmt.Errorf("--yes was given but %w", err)
@@ -89,6 +89,7 @@ flags act as form pre-population and the user can edit before submitting.`,
 				SkipListGoStraightToForm: true,
 				PreviewTemplate:          templatePreviewer(a),
 				LayoutNames:              templateNames(a),
+				ResolveLayout:            layoutResolver(a),
 				Theme:                    a.Config.ThemeOr("default"),
 				ThemesDir:                a.Paths.ThemesDir,
 				ConfigPath:               a.Paths.ConfigFile,
@@ -99,9 +100,9 @@ flags act as form pre-population and the user can edit before submitting.`,
 			if res.Cancelled() {
 				return nil
 			}
-		// User may have switched to an existing project from the AlreadyRegistered prompt.
-		// In form-only mode that prompt is never shown, but handle it safely regardless.
-		switch v := res.Intent.(type) {
+			// User may have switched to an existing project from the AlreadyRegistered prompt.
+			// In form-only mode that prompt is never shown, but handle it safely regardless.
+			switch v := res.Intent.(type) {
 			case picker.SwitchIntent:
 				p, err := project.Load(a.Paths)
 				if err != nil {
@@ -258,21 +259,43 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 		return errors.New("either Directory or Clone from URL is required")
 	}
 
-	// Resolve layout up front.
-	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, intent.Template)
-	if err != nil {
-		return err
+	// Resolve layout up front. The picker's layout editor may have already
+	// materialised the tree (form → editor → apply); when present, that
+	// edited tree wins over re-resolving the bare template.
+	//
+	// The registry's `Project.Layout` field is a template lookup key that
+	// `loadOrRegenerateLayout` will resolve later. It must remain a valid
+	// template key (or empty → "default"); it is NOT the same as the
+	// layout struct's display `Name`, which can come from the YAML file's
+	// `name:` and may differ from its lookup key. We therefore derive
+	// `templateKey` from the user's submitted intent, independently of
+	// `l.Name`.
+	var l layout.Layout
+	if intent.MaterialisedLayout != nil {
+		l = *intent.MaterialisedLayout
+	} else {
+		resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, intent.Template)
+		if err != nil {
+			return err
+		}
+		l = resolved.Layout
 	}
-	l := resolved.Layout
 	if l.Name == "" {
 		l.Name = intent.Template
 	}
 	if l.Name == "" {
 		l.Name = "default"
 	}
+	templateKey := strings.TrimSpace(intent.Template)
+	if templateKey == "" {
+		templateKey = "default"
+	}
 
 	// Resolve directory.
-	var dir string
+	var (
+		dir string
+		err error
+	)
 	if intent.From != "" {
 		// Apply git default-remote shorthand expansion (bare "boo" → "<remote>/boo").
 		intent.From = expandRepoShorthand(intent.From, a.Config.GitDefaultRemoteOr(""))
@@ -328,7 +351,7 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 		if err := reg.Add(project.Project{
 			Name:      intent.Name,
 			Dir:       dir,
-			Layout:    l.Name,
+			Layout:    templateKey,
 			CreatedAt: time.Now().UTC(),
 		}); err != nil {
 			_ = project.PurgeProjectDir(a.Paths, intent.Name)
@@ -338,7 +361,7 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 			_ = project.PurgeProjectDir(a.Paths, intent.Name)
 			return err
 		}
-		_, _ = fmt.Fprintf(out, "Registered %q at %s (layout: %s)\n", intent.Name, dir, l.Name)
+		_, _ = fmt.Fprintf(out, "Registered %q at %s (layout: %s)\n", intent.Name, dir, templateKey)
 
 		// Auto-launch after creation (matches user expectation that "registering" also opens).
 		p, err := reg.Get(intent.Name)

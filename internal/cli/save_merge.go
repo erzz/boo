@@ -81,7 +81,8 @@ func mergeTab(prev, captured layout.Tab) (layout.Tab, []string) {
 	out.Root = buildFlatRoot(mergedLeaves)
 
 	// Dropped tail of prev: report unrecoverable data.
-	for i := common; i < len(prevLeaves); i++ {		for _, r := range leafLossReasons(0, captured.Name, i, prevLeaves[i]) {
+	for i := common; i < len(prevLeaves); i++ {
+		for _, r := range leafLossReasons(0, captured.Name, i, prevLeaves[i]) {
 			lost = append(lost, fmt.Sprintf("dropped: %s", r))
 		}
 	}

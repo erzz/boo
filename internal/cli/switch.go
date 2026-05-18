@@ -176,6 +176,7 @@ func splitToParams(projectDir string, s layout.Split) ghostty.LayoutSplit {
 	return ghostty.LayoutSplit{
 		Direction: s.Direction,
 		Children:  children,
+		Size:      s.Size,
 	}
 }
 

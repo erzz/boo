@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	booexec "github.com/erzz/boo/internal/exec"
 	"github.com/erzz/boo/internal/doctor"
+	booexec "github.com/erzz/boo/internal/exec"
 	"github.com/erzz/boo/internal/ghostty"
 	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/layoutpreview"

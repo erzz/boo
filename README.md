@@ -143,8 +143,39 @@ etc.
 - **Directory** — existing path, or a `git@…` / `https://…` URL to clone
 - **Layout** — cycler over the available templates (`←` / `→` to choose). Defaults to `triple`.
 
-Submitting the form registers the project, captures or generates its layout, and immediately opens
-the Ghostty window. Cancel with `esc`.
+Submitting the form opens an interactive **layout editor** before the
+project is registered, where you can:
+
+- Set a startup `command` for any pane.
+- Adjust the proportions of each split (move dividers).
+
+Apply with `ctrl+s` to register the project and open the Ghostty
+window. Skip with `esc` to use the template as-is. Cancel the whole
+flow from the editor with `esc` (from LAYOUT mode).
+
+### Layout editor
+
+The editor opens in **LAYOUT mode** (move dividers and select panes):
+
+| key | action |
+| --- | --- |
+| `↑` `↓` `←` `→` (or `h` `j` `k` `l`) | move selection between panes / dividers |
+| `+` / `-` (or `>` / `<`) | grow / shrink the selected divider by 5% |
+| `0` | reset the selected divider to an even split |
+| `c` | edit the selected pane's startup command (enters COMMAND mode) |
+| `ctrl+s` | apply: register the project and open the window |
+| `esc` | cancel back to the new-project form |
+
+In **COMMAND mode** the textinput owns the keyboard:
+
+| key | action |
+| --- | --- |
+| any printable | edit the command string |
+| `enter` or `esc` | commit and return to LAYOUT mode |
+
+Customised layouts are written to the project's own `layout.yaml`; the
+registry remembers the original template key, so `boo set-layout` still
+works to swap back later.
 
 ## Layouts
 
@@ -158,6 +189,10 @@ A layout is a tree of windows → tabs → splits. Each leaf can specify:
 - `command` — long-running command to launch in that pane (e.g. `nvim .`)
 - `initial_input` — text to type into the shell after the pane opens (e.g. `lazygit\n`)
 - `env` — extra environment variables for that pane
+
+Each interior split can also specify `size` — the first child's
+fractional share of the split (e.g. `size: 0.4` gives the left/top pane
+40%). Omit for an even split.
 
 `triple` is the default: one large left pane, two stacked panes on the right.
 

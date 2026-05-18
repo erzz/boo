@@ -16,8 +16,8 @@ import (
 	"github.com/spf13/cobra"
 
 	booexec "github.com/erzz/boo/internal/exec"
-	"github.com/erzz/boo/internal/git"
 	"github.com/erzz/boo/internal/ghostty"
+	"github.com/erzz/boo/internal/git"
 	"github.com/erzz/boo/internal/project"
 	"github.com/erzz/boo/internal/state"
 )

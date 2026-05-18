@@ -172,12 +172,12 @@ still printed to stderr under --force so audit logs show what was lost.`,
 				_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: %s\n", w)
 			}
 
-		// Compare against the previously-saved layout.
-		// Error handling:
-		//   - missing file (first save) → treat as no previous → silent path.
-		//   - parse error (corrupt file) → warn and fall through so user can recover by saving over it.
-		//   - other read errors (permissions) → hard error; refusing to overwrite is safer.
-		var prev layout.Layout
+			// Compare against the previously-saved layout.
+			// Error handling:
+			//   - missing file (first save) → treat as no previous → silent path.
+			//   - parse error (corrupt file) → warn and fall through so user can recover by saving over it.
+			//   - other read errors (permissions) → hard error; refusing to overwrite is safer.
+			var prev layout.Layout
 			loaded, perr := project.LoadLayout(a.Paths, p.Name)
 			switch {
 			case perr == nil:
@@ -191,16 +191,16 @@ still printed to stderr under --force so audit logs show what was lost.`,
 			}
 			diff := diffForSave(prev, newLayout)
 
-		// Fold prev's invisible fields (command, env, initial_input, direction) into the
-		// captured layout. The merged value is what we write AND what the diff reflects.
-		merged, mergeLost := mergeForSave(prev, newLayout)
+			// Fold prev's invisible fields (command, env, initial_input, direction) into the
+			// captured layout. The merged value is what we write AND what the diff reflects.
+			merged, mergeLost := mergeForSave(prev, newLayout)
 			if err := merged.Validate(); err != nil {
 				return fmt.Errorf("merged layout failed validation: %w", err)
 			}
 			diff = diffForSave(prev, merged)
-		if len(mergeLost) > 0 {
-			// Promote to Lossy if merge dropped tabs/splits with command/env/etc.
-			diff.LossReasons = append(diff.LossReasons, mergeLost...)
+			if len(mergeLost) > 0 {
+				// Promote to Lossy if merge dropped tabs/splits with command/env/etc.
+				diff.LossReasons = append(diff.LossReasons, mergeLost...)
 				if diff.Outcome != OutcomeLossy {
 					diff.Outcome = OutcomeLossy
 				}
