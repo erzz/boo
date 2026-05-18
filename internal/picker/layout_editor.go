@@ -30,14 +30,27 @@ type interiorRef struct {
 }
 
 // editorMode picks which set of nodes the editor cycles over and which fields
-// are bound to keystrokes. Modes are independent — the leaf cursor and divider
-// cursor each remember their own position so toggling back and forth doesn't
-// reset them.
+// are bound to keystrokes.
+//
+// User-facing naming: "LAYOUT mode" (modeDivider) is the default navigation
+// mode where tab cycles dividers and +/- adjust sizes; bare letter keys are
+// free for shortcuts because no textinput is focused. "COMMAND mode"
+// (modeLeaf) is entered from layout mode via `c` — it focuses the textinput on
+// the active pane so the user can type a command. Pressing enter or esc in
+// COMMAND mode commits and returns to LAYOUT mode.
+//
+// Internal naming (modeLeaf / modeDivider) is kept because it accurately
+// describes which kind of node the cursor walks. Don't rename the constants —
+// they line up 1:1 with leafRef / interiorRef and the renderer's region
+// indexing.
+//
+// Each mode remembers its own cursor independently so moving between modes
+// doesn't reset progress.
 type editorMode int
 
 const (
-	modeLeaf    editorMode = iota // tab cycles leaves, textinput edits Command
-	modeDivider                   // tab cycles interior nodes, +/- adjust Size
+	modeLeaf    editorMode = iota // COMMAND mode: textinput edits the active leaf's Command
+	modeDivider                   // LAYOUT mode: tab cycles interiors, +/- adjust Size
 )
 
 // sizeStep is how much one +/- press changes the first child's share. 0.05
@@ -87,6 +100,11 @@ const editorPreviewWidth = 50
 // they own — the editor mutates it in place. An empty `leaves` slice is valid
 // (degenerate single-leaf layout still produces one entry); empty `interiors`
 // is also valid (single-leaf layouts have no dividers).
+//
+// Starts in LAYOUT mode (modeDivider). Most users will accept the templated
+// commands and only want to nudge sizes, so opening directly into a focused
+// textinput is more friction than landing on a navigable preview. Users who
+// want to set a command press `c` from layout mode.
 func newLayoutEditorModel(projectName, templateName string, lay *layout.Layout) layoutEditorModel {
 	leaves := collectLeaves(lay)
 	interiors := collectInteriors(lay)
@@ -98,12 +116,13 @@ func newLayoutEditorModel(projectName, templateName string, lay *layout.Layout) 
 	if len(leaves) > 0 {
 		ti.SetValue(leaves[0].split.Command)
 	}
-	ti.Focus()
+	// Don't Focus() yet — we start in LAYOUT mode. enterCommandMode() focuses
+	// the input when the user explicitly switches in with `c`.
 	return layoutEditorModel{
 		projectName:  projectName,
 		templateName: templateName,
 		lay:          lay,
-		mode:         modeLeaf,
+		mode:         modeDivider,
 		leaves:       leaves,
 		currentIdx:   0,
 		cmdInput:     ti,
@@ -181,24 +200,33 @@ func (e *layoutEditorModel) cycle(delta int) {
 	}
 }
 
-// toggleMode flips between leaf and divider modes. Persists any in-flight
-// command edit before leaving leaf mode so the user doesn't lose typed text.
-// If the layout has no interiors the toggle still works (the divider view
-// will show an empty-state message), but typically users will only encounter
-// it in interesting (multi-pane) layouts.
-func (e *layoutEditorModel) toggleMode() {
+// enterCommandMode switches from LAYOUT to COMMAND mode and focuses the
+// textinput on the currently-active leaf. If the editor is already in COMMAND
+// mode, it's a no-op. Called when the user presses `c` from layout mode.
+func (e *layoutEditorModel) enterCommandMode() {
 	if e.mode == modeLeaf {
-		e.saveCurrent()
-		e.mode = modeDivider
 		return
 	}
 	e.mode = modeLeaf
-	// Restore the textinput to whatever the active leaf currently holds; the
-	// user can't have edited it from divider mode but a future feature might.
+	// Refresh the textinput with the active leaf's current Command so users
+	// can edit (not overwrite) what's already there.
 	if e.currentIdx >= 0 && e.currentIdx < len(e.leaves) {
 		e.cmdInput.SetValue(e.leaves[e.currentIdx].split.Command)
 		e.cmdInput.CursorEnd()
 	}
+	e.cmdInput.Focus()
+}
+
+// exitCommandMode commits any in-flight textinput value to the active leaf
+// and returns to LAYOUT mode. If the editor isn't in COMMAND mode, no-op.
+// Called when the user presses enter or esc from command mode.
+func (e *layoutEditorModel) exitCommandMode() {
+	if e.mode == modeDivider {
+		return
+	}
+	e.saveCurrent()
+	e.cmdInput.Blur()
+	e.mode = modeDivider
 }
 
 // bumpSize nudges the active interior's Size by delta, clamped to
@@ -239,14 +267,21 @@ func (e *layoutEditorModel) resetSize() {
 	e.interiors[e.interiorIdx].split.Size = 0
 }
 
-// view renders the editor: header, highlighted layout preview, current-node
-// label, mode-specific controls, footer. width is the terminal width; passed
-// in so the textinput can scale rather than overflow on narrow terminals.
+// view renders the editor: title, mode banner, highlighted layout preview,
+// current-node label, mode-specific controls, footer. width is the terminal
+// width; passed in so the textinput can scale rather than overflow on narrow
+// terminals.
 func (e layoutEditorModel) view(t Theme, width int) string {
 	var b strings.Builder
 	b.WriteString(t.RightPaneTitle.Render(fmt.Sprintf("Customise layout — %s", e.projectName)))
 	b.WriteString("\n")
-	b.WriteString(t.RightPaneFaint.Render(fmt.Sprintf("template: %s · mode: %s", e.templateName, modeName(e.mode))))
+	b.WriteString(t.RightPaneFaint.Render(fmt.Sprintf("template: %s", e.templateName)))
+	b.WriteString("\n\n")
+
+	// Loud always-visible mode banner. The active mode is rendered with the
+	// accent style; the inactive mode is dim. The cue to switch lives on the
+	// banner itself so the user never has to scan the footer to find it.
+	b.WriteString(modeBanner(e.mode, t))
 	b.WriteString("\n\n")
 
 	if len(e.leaves) == 0 {
@@ -267,27 +302,63 @@ func (e layoutEditorModel) view(t Theme, width int) string {
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(t.RightPaneFaint.Render(
-		"[tab/shift+tab] cycle · [ctrl+l] toggle mode · [ctrl+s] save & create · [esc] back to form"))
+	b.WriteString(t.RightPaneFaint.Render(modeFooter(e.mode)))
 	return wrapEditorFrame(b.String())
 }
 
-// modeName is a short human label for the status header.
-func modeName(m editorMode) string {
+// modeBanner renders the always-visible mode strip:
+//
+//	▶ LAYOUT      ○ COMMANDS        (press c to edit commands)
+//	○ LAYOUT      ▶ COMMANDS        (press enter/esc to finish)
+//
+// The marker (▶) and accent style mark the active mode; the inactive pill is
+// dimmed. The trailing hint reinforces the keystroke to switch out of the
+// current mode.
+func modeBanner(m editorMode, t Theme) string {
+	const (
+		activeMark   = "▶"
+		inactiveMark = "○"
+	)
+	layoutPill := fmt.Sprintf("%s LAYOUT", activeMark)
+	commandPill := fmt.Sprintf("%s COMMANDS", inactiveMark)
+	hint := "press c to edit commands"
+	if m == modeLeaf {
+		layoutPill = fmt.Sprintf("%s LAYOUT", inactiveMark)
+		commandPill = fmt.Sprintf("%s COMMANDS", activeMark)
+		hint = "press enter/esc to finish editing"
+	}
+	if m == modeLeaf {
+		return t.RightPaneFaint.Render(layoutPill) + "   " +
+			t.RightPaneTitle.Render(commandPill) + "     " +
+			t.RightPaneFaint.Render(hint)
+	}
+	return t.RightPaneTitle.Render(layoutPill) + "   " +
+		t.RightPaneFaint.Render(commandPill) + "     " +
+		t.RightPaneFaint.Render(hint)
+}
+
+// modeFooter returns the per-mode key hints. Common keys (apply, back) repeat
+// in both because they're always live. Two lines so wide terminals don't
+// clip and narrow terminals still get readable wrapping. Mode-specific keys
+// are on the first line; the always-available control keys on the second.
+func modeFooter(m editorMode) string {
 	switch m {
-	case modeDivider:
-		return "divider (sizes)"
+	case modeLeaf:
+		return "[type] edit command  ·  [enter/esc] done editing\n" +
+			"[ctrl+s] save & create"
 	default:
-		return "leaf (commands)"
+		return "[tab/shift+tab] cycle  ·  [+/-] adjust 5%  ·  [0] split evenly  ·  [c] edit command\n" +
+			"[ctrl+s] save & create  ·  [esc] back to form"
 	}
 }
 
-// renderLeafControls draws the per-leaf label and the command textinput.
-// Mutates the receiver's textinput Width as a side effect — same pattern the
-// pre-M4 view used; cheap and avoids threading width through the model.
+// renderLeafControls draws the per-leaf section title and the command
+// textinput. Mutates the receiver's textinput Width as a side effect — same
+// pattern the pre-M4 view used; cheap and avoids threading width through the
+// model.
 func (e layoutEditorModel) renderLeafControls(b *strings.Builder, t Theme, width int) {
 	cur := e.leaves[e.currentIdx]
-	label := fmt.Sprintf("Pane %d/%d", e.currentIdx+1, len(e.leaves))
+	label := fmt.Sprintf("▶ EDITING COMMAND — Pane %d/%d", e.currentIdx+1, len(e.leaves))
 	if len(e.lay.Tabs) > 1 {
 		label += fmt.Sprintf(" (tab %d)", cur.tabIdx+1)
 	}
@@ -305,16 +376,17 @@ func (e layoutEditorModel) renderLeafControls(b *strings.Builder, t Theme, width
 	b.WriteString(e.cmdInput.View())
 }
 
-// renderDividerControls draws the per-interior label, current Size as a
-// percentage + bar, and the divider keymap. Empty-state when the layout has
-// no interiors at all (single-leaf tabs only).
+// renderDividerControls draws the per-interior section title, current Size as
+// a percentage + bar. Empty-state when the layout has no interiors at all
+// (single-leaf tabs only). Key hints live in the footer (modeFooter), not
+// inline, so the controls block stays focused on what it's controlling.
 func (e layoutEditorModel) renderDividerControls(b *strings.Builder, t Theme) {
 	if len(e.interiors) == 0 {
 		b.WriteString(t.RightPaneFaint.Render("(no dividers — layout is all single panes)"))
 		return
 	}
 	cur := e.interiors[e.interiorIdx]
-	label := fmt.Sprintf("Divider %d/%d (%s)", e.interiorIdx+1, len(e.interiors), cur.split.Direction)
+	label := fmt.Sprintf("▶ MOVING DIVIDER — Divider %d/%d (%s)", e.interiorIdx+1, len(e.interiors), cur.split.Direction)
 	if len(e.lay.Tabs) > 1 {
 		label += fmt.Sprintf(" (tab %d)", cur.tabIdx+1)
 	}
@@ -333,8 +405,6 @@ func (e layoutEditorModel) renderDividerControls(b *strings.Builder, t Theme) {
 	if !explicit {
 		b.WriteString(t.RightPaneFaint.Render("  (default — split evenly)"))
 	}
-	b.WriteString("\n  ")
-	b.WriteString(t.RightPaneFaint.Render("[+/-] adjust 5% · [0] reset to even"))
 }
 
 // sizeBar renders a fixed-width bar showing the first child's fractional
@@ -484,25 +554,32 @@ func overlayHighlight(grid string, r layoutpreview.Region, _ Theme) string {
 
 // updateLayoutEditor handles input on the editor sub-screen.
 //
-// Apply (ctrl+s): save current input (leaf mode) and dispatch the intent with
-// the materialised layout attached. Panes left blank are rendered as plain
-// shells by the JXA walker — there is no "skip" path because doing nothing in
-// the editor already produces an untouched layout.
+// Apply (ctrl+s): save current input (command mode) and dispatch the intent
+// with the materialised layout attached. Panes left blank are rendered as
+// plain shells by the JXA walker — there is no "skip" path because doing
+// nothing in the editor already produces an untouched layout.
 //
-// Back (esc): drop in-flight edits and return to the form.
+// Back (esc) is mode-sensitive:
+//   - COMMAND mode → commit textinput and return to LAYOUT mode (does NOT
+//     leave the editor). Same effect as pressing enter.
+//   - LAYOUT mode → drop in-flight edits and return to the form.
 //
-// Toggle mode (ctrl+l): switch between leaf (commands) and divider (sizes).
+// Mode transitions:
+//   - `c` in LAYOUT mode enters COMMAND mode (focuses textinput on active leaf).
+//   - `enter` / `esc` in COMMAND mode exits back to LAYOUT mode.
 //
-// Cycle (tab/shift+tab): move between leaves or interiors depending on mode.
+// Cycle (tab/shift+tab): walk leaves (command mode) or interiors (layout mode).
 //
-// Divider mode keys (+ / - / 0): only fire when the editor is in divider mode;
-// in leaf mode they fall through to the textinput as plain characters.
+// LAYOUT-mode keys (+ / - / 0 / c): only fire when the editor is in LAYOUT
+// mode; in COMMAND mode they fall through to the textinput as plain characters
+// (so users can type a `+` or a `c` in a command name).
 //
-// Anything else in leaf mode: forwarded to the textinput. Anything else in
-// divider mode: ignored.
+// Anything else in COMMAND mode: forwarded to the textinput. Anything else in
+// LAYOUT mode: ignored.
 func (m *model) updateLayoutEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok {
 		pressed := km.String()
+		// Mode-agnostic keys that always do the same thing.
 		switch {
 		case matches(m.keys.LayoutEditCycleNext, pressed):
 			m.layoutEditor.cycle(+1)
@@ -512,32 +589,45 @@ func (m *model) updateLayoutEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case matches(m.keys.LayoutEditApply, pressed):
 			return m.applyLayoutEditor()
-		case matches(m.keys.LayoutEditBack, pressed):
-			return m.backToFormFromEditor()
-		case matches(m.keys.LayoutEditToggleMode, pressed):
-			m.layoutEditor.toggleMode()
-			return m, nil
 		}
-		// Divider-mode-only keys. Gating prevents +/-/0 from being eaten when
-		// the user is typing a command in leaf mode.
-		if m.layoutEditor.mode == modeDivider {
-			switch {
-			case matches(m.keys.LayoutEditSizeIncr, pressed):
-				m.layoutEditor.bumpSize(+sizeStep)
-				return m, nil
-			case matches(m.keys.LayoutEditSizeDecr, pressed):
-				m.layoutEditor.bumpSize(-sizeStep)
-				return m, nil
-			case matches(m.keys.LayoutEditSizeReset, pressed):
-				m.layoutEditor.resetSize()
+
+		// COMMAND mode: enter/esc exit back to LAYOUT mode. Must be checked
+		// BEFORE LayoutEditBack so esc-in-command-mode doesn't blow up the
+		// editor; LayoutEditBack only fires in LAYOUT mode.
+		if m.layoutEditor.mode == modeLeaf {
+			if matches(m.keys.LayoutEditExitCommand, pressed) {
+				m.layoutEditor.exitCommandMode()
 				return m, nil
 			}
-			// Anything else in divider mode is intentionally ignored — there
-			// is no textinput to forward to.
+			// Anything else: forward to the textinput so the user can type.
+			var cmd tea.Cmd
+			m.layoutEditor.cmdInput, cmd = m.layoutEditor.cmdInput.Update(msg)
+			return m, cmd
+		}
+
+		// LAYOUT mode keys.
+		switch {
+		case matches(m.keys.LayoutEditBack, pressed):
+			return m.backToFormFromEditor()
+		case matches(m.keys.LayoutEditEnterCommand, pressed):
+			m.layoutEditor.enterCommandMode()
+			return m, nil
+		case matches(m.keys.LayoutEditSizeIncr, pressed):
+			m.layoutEditor.bumpSize(+sizeStep)
+			return m, nil
+		case matches(m.keys.LayoutEditSizeDecr, pressed):
+			m.layoutEditor.bumpSize(-sizeStep)
+			return m, nil
+		case matches(m.keys.LayoutEditSizeReset, pressed):
+			m.layoutEditor.resetSize()
 			return m, nil
 		}
+		// Anything else in LAYOUT mode is intentionally ignored — there
+		// is no textinput to forward to.
+		return m, nil
 	}
-	// Leaf-mode default: forward to the textinput.
+	// Non-key messages: in COMMAND mode forward to the textinput (cursor
+	// blink ticks etc.). In LAYOUT mode there's no recipient.
 	if m.layoutEditor.mode == modeLeaf {
 		var cmd tea.Cmd
 		m.layoutEditor.cmdInput, cmd = m.layoutEditor.cmdInput.Update(msg)

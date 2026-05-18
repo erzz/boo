@@ -117,10 +117,13 @@ func TestLayoutEditor_BlankTemplateStillOpensEditorViaFormDefault(t *testing.T) 
 
 // TestLayoutEditor_CycleWalksDFSWithWraparound:
 // tab cycles through leaves in DFS order; shift+tab goes backwards; both wrap.
+// Editor opens in LAYOUT mode by default, so this test enters COMMAND mode
+// first (where tab cycles leaves rather than dividers).
 func TestLayoutEditor_CycleWalksDFSWithWraparound(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
+	m = pressKey(t, m, "c") // enter COMMAND mode
 
 	// Confirm starting position.
 	if got := m.layoutEditor.leaves[m.layoutEditor.currentIdx].split.Cwd; got != "left" {
@@ -146,14 +149,15 @@ func TestLayoutEditor_CycleWalksDFSWithWraparound(t *testing.T) {
 }
 
 // TestLayoutEditor_ApplyAttachesMaterialisedLayout:
-// type → ctrl+s; intent's MaterialisedLayout reflects the typed command on the
-// active leaf and the picker quits with that intent.
+// enter COMMAND mode → type → ctrl+s; intent's MaterialisedLayout reflects
+// the typed command on the active leaf and the picker quits with that intent.
 func TestLayoutEditor_ApplyAttachesMaterialisedLayout(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
 
-	// Type "htop" into the first leaf's command field.
+	// Enter command mode then type "htop" into the first leaf's command field.
+	m = pressKey(t, m, "c")
 	for _, r := range "htop" {
 		m = pressKey(t, m, string(r))
 	}
@@ -182,11 +186,12 @@ func TestLayoutEditor_ApplyAttachesMaterialisedLayout(t *testing.T) {
 
 // TestLayoutEditor_ApplyPersistsEditsAcrossLeafSwitches:
 // edits made before cycling should survive the cycle and end up in the final
-// materialised layout.
+// materialised layout. All in COMMAND mode (where tab cycles leaves).
 func TestLayoutEditor_ApplyPersistsEditsAcrossLeafSwitches(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
+	m = pressKey(t, m, "c") // → COMMAND mode
 
 	for _, r := range "vim" {
 		m = pressKey(t, m, string(r))
@@ -206,23 +211,30 @@ func TestLayoutEditor_ApplyPersistsEditsAcrossLeafSwitches(t *testing.T) {
 }
 
 // TestLayoutEditor_EscReturnsToFormAndDiscardsEdits:
-// type → esc; the editor goes away, screen returns to the form, and no
-// intent is dispatched. The user's keystrokes are intentionally discarded —
-// esc means "back, let me amend my submission", not "create with no edits".
-// (Blank-Command-means-shell is the natural default; users wanting an
-// unmodified template just hit ctrl+s without typing.)
+// from LAYOUT mode (the default), esc backs out to the form. Per-leaf typed
+// commands made during a previous COMMAND-mode session are discarded — esc
+// means "back, let me amend my submission", not "create with whatever I
+// already typed". (Blank-Command-means-shell is the natural default; users
+// wanting an unmodified template just hit ctrl+s without typing.)
 func TestLayoutEditor_EscReturnsToFormAndDiscardsEdits(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
 
+	// Type something into a leaf so we can confirm it's discarded on back.
+	m = pressKey(t, m, "c")
 	for _, r := range "htop" {
 		m = pressKey(t, m, string(r))
 	}
+	m = pressKey(t, m, "enter") // commit, return to LAYOUT mode
+	if m.layoutEditor.mode != modeDivider {
+		t.Fatalf("after enter: mode=%v, want modeDivider (back in LAYOUT)", m.layoutEditor.mode)
+	}
+	// Now esc from LAYOUT mode must exit the editor.
 	m = pressKey(t, m, "esc")
 
 	if m.screen != screenForm {
-		t.Errorf("screen = %v, want screenForm (esc must return to the form)", m.screen)
+		t.Errorf("screen = %v, want screenForm (esc in LAYOUT mode must return to the form)", m.screen)
 	}
 	if m.intent != nil {
 		t.Errorf("intent = %#v, want nil (esc must NOT dispatch)", m.intent)
@@ -258,15 +270,17 @@ func TestLayoutEditor_ResolverErrorSkipsEditor(t *testing.T) {
 }
 
 // TestLayoutEditor_ViewMentionsKeysAndProject sanity-checks that the rendered
-// editor names the project, the template, and the four bindings — so future
-// keymap drift fails loudly rather than producing a confusing footer.
+// editor names the project, the template, the mode banner, and the keys that
+// drive the LAYOUT-mode footer (the default on entry) — so future drift in
+// the footer text or default mode fails loudly rather than producing a
+// confusing first impression. "esc" is in the footer; "ctrl+s" is too.
 func TestLayoutEditor_ViewMentionsKeysAndProject(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
 
 	v := m.View()
-	for _, want := range []string{"myproj", "triple", "tab", "shift+tab", "ctrl+s", "esc"} {
+	for _, want := range []string{"myproj", "triple", "LAYOUT", "COMMANDS", "tab", "shift+tab", "ctrl+s", "esc", "[c]"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("editor view missing %q. View:\n%s", want, v)
 		}
@@ -289,52 +303,60 @@ func openLayoutEditorViaForm(t *testing.T, m *model, name, dir, template string)
 	_ = pressKey(t, m, "ctrl+s")
 }
 
-// TestLayoutEditor_ToggleModeFlipsAndPreservesCursors: ctrl+l flips between
-// leaf and divider modes; each mode's cursor position is independent so
-// flipping back and forth doesn't reset progress.
-func TestLayoutEditor_ToggleModeFlipsAndPreservesCursors(t *testing.T) {
+// TestLayoutEditor_ModeSwitchPreservesCursors: `c` enters COMMAND mode, `esc`
+// (or enter) returns to LAYOUT mode; each mode's cursor position is
+// independent so switching back and forth doesn't reset progress.
+func TestLayoutEditor_ModeSwitchPreservesCursors(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
 
-	// Leaf mode: advance to leaf 1.
-	m = pressKey(t, m, "tab")
-	if m.layoutEditor.mode != modeLeaf || m.layoutEditor.currentIdx != 1 {
-		t.Fatalf("after tab: mode=%v currentIdx=%d, want modeLeaf, 1", m.layoutEditor.mode, m.layoutEditor.currentIdx)
-	}
-
-	// Toggle to divider mode.
-	m = pressKey(t, m, "ctrl+l")
+	// Default: LAYOUT mode. Advance the divider cursor to interior 1.
 	if m.layoutEditor.mode != modeDivider {
-		t.Fatalf("after ctrl+l: mode=%v, want modeDivider", m.layoutEditor.mode)
+		t.Fatalf("default mode = %v, want modeDivider (LAYOUT)", m.layoutEditor.mode)
 	}
-	// Advance the interior cursor.
 	m = pressKey(t, m, "tab")
 	if m.layoutEditor.interiorIdx != 1 {
-		t.Fatalf("after tab in divider mode: interiorIdx=%d, want 1", m.layoutEditor.interiorIdx)
+		t.Fatalf("after tab in LAYOUT: interiorIdx=%d, want 1", m.layoutEditor.interiorIdx)
 	}
 
-	// Toggle back to leaf — leaf cursor must still be at 1, divider cursor at 1.
-	m = pressKey(t, m, "ctrl+l")
+	// Enter COMMAND mode and advance the leaf cursor to leaf 1.
+	m = pressKey(t, m, "c")
 	if m.layoutEditor.mode != modeLeaf {
-		t.Fatalf("after second ctrl+l: mode=%v, want modeLeaf", m.layoutEditor.mode)
+		t.Fatalf("after c: mode=%v, want modeLeaf (COMMAND)", m.layoutEditor.mode)
+	}
+	m = pressKey(t, m, "tab")
+	if m.layoutEditor.currentIdx != 1 {
+		t.Fatalf("after tab in COMMAND: currentIdx=%d, want 1", m.layoutEditor.currentIdx)
+	}
+
+	// Exit back to LAYOUT — divider cursor must still be at 1, leaf cursor at 1.
+	m = pressKey(t, m, "esc")
+	if m.layoutEditor.mode != modeDivider {
+		t.Fatalf("after esc: mode=%v, want modeDivider", m.layoutEditor.mode)
+	}
+	if m.layoutEditor.interiorIdx != 1 {
+		t.Errorf("divider cursor lost: interiorIdx=%d, want 1", m.layoutEditor.interiorIdx)
 	}
 	if m.layoutEditor.currentIdx != 1 {
-		t.Errorf("leaf cursor lost: currentIdx=%d, want 1", m.layoutEditor.currentIdx)
+		t.Errorf("leaf cursor lost across mode switch: currentIdx=%d, want 1", m.layoutEditor.currentIdx)
 	}
-	if m.layoutEditor.interiorIdx != 1 {
-		t.Errorf("divider cursor lost across mode flip: interiorIdx=%d, want 1", m.layoutEditor.interiorIdx)
+	// Editor must still be on its screen — esc from LAYOUT exits the editor,
+	// but we only reach LAYOUT here via an esc from COMMAND, so the screen
+	// stays put.
+	if m.screen != screenLayoutEditor {
+		t.Errorf("screen = %v, want screenLayoutEditor (esc-from-COMMAND must NOT exit the editor)", m.screen)
 	}
 }
 
 // TestLayoutEditor_DividerCycleMatchesInteriorPointers: tab/shift+tab in
-// divider mode walks layout.InteriorPointers in order, with wraparound. The
-// fixed layout has 2 interiors (outer row + inner column).
+// LAYOUT mode (the default) walks layout.InteriorPointers in order, with
+// wraparound. The fixed layout has 2 interiors (outer row + inner column).
 func TestLayoutEditor_DividerCycleMatchesInteriorPointers(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
-	m = pressKey(t, m, "ctrl+l") // → divider mode
+	// Default mode is LAYOUT — no toggle needed.
 
 	if got := len(m.layoutEditor.interiors); got != 2 {
 		t.Fatalf("interiors = %d, want 2", got)
@@ -366,12 +388,12 @@ func TestLayoutEditor_DividerCycleMatchesInteriorPointers(t *testing.T) {
 
 // TestLayoutEditor_BumpSizePromotesZeroAndClamps: an unset Size (0 = "even")
 // is promoted to 0.5 on first bump so the visible move feels natural; further
-// bumps clamp to [sizeMin, sizeMax].
+// bumps clamp to [sizeMin, sizeMax]. LAYOUT mode is the default.
 func TestLayoutEditor_BumpSizePromotesZeroAndClamps(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
-	m = pressKey(t, m, "ctrl+l") // → divider mode, on outer row
+	// LAYOUT mode by default, on the outer row.
 
 	// Initial: Size == 0.
 	if m.layoutEditor.interiors[0].split.Size != 0 {
@@ -399,12 +421,12 @@ func TestLayoutEditor_BumpSizePromotesZeroAndClamps(t *testing.T) {
 }
 
 // TestLayoutEditor_ResetSizeRestoresEvenSplit: the "0" key clears Size back to
-// 0 (which the renderer + JXA walker treat as "split evenly").
+// 0 (which the renderer + JXA walker treat as "split evenly"). LAYOUT mode is
+// the default.
 func TestLayoutEditor_ResetSizeRestoresEvenSplit(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
-	m = pressKey(t, m, "ctrl+l")
 	m = pressKey(t, m, "+")
 	m = pressKey(t, m, "+")
 	if m.layoutEditor.interiors[0].split.Size == 0 {
@@ -417,29 +439,30 @@ func TestLayoutEditor_ResetSizeRestoresEvenSplit(t *testing.T) {
 }
 
 // TestLayoutEditor_DividerKeysAreInertInLeafMode: +/-/0 must NOT mutate Size
-// when the editor is in leaf mode — they should fall through to the textinput
-// as plain typed characters so users can put a "+" in a command name.
+// when the editor is in COMMAND mode — they should fall through to the
+// textinput as plain typed characters so users can put a "+" in a command
+// name. Enters command mode explicitly first.
 func TestLayoutEditor_DividerKeysAreInertInLeafMode(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
-	// Leaf mode by default. Press "+" — must land in the textinput, not Size.
+	m = pressKey(t, m, "c") // → COMMAND mode
+	// Press "+" — must land in the textinput, not Size.
 	m = pressKey(t, m, "+")
 	if got := m.layoutEditor.interiors[0].split.Size; got != 0 {
-		t.Errorf("leaf-mode +: Size mutated to %v, want 0", got)
+		t.Errorf("COMMAND-mode +: Size mutated to %v, want 0", got)
 	}
 	if got := m.layoutEditor.cmdInput.Value(); got != "+" {
-		t.Errorf("leaf-mode +: textinput = %q, want %q", got, "+")
+		t.Errorf("COMMAND-mode +: textinput = %q, want %q", got, "+")
 	}
 }
 
 // TestLayoutEditor_ApplyPersistsSize: a divider edit survives apply and lands
-// on the materialised layout the CLI receives.
+// on the materialised layout the CLI receives. LAYOUT mode is the default.
 func TestLayoutEditor_ApplyPersistsSize(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
-	m = pressKey(t, m, "ctrl+l")
 	m = pressKey(t, m, "+") // outer row → 0.55
 	m = pressKey(t, m, "ctrl+s")
 
@@ -460,8 +483,8 @@ func TestLayoutEditor_ApplyPersistsSize(t *testing.T) {
 }
 
 // TestLayoutEditor_DividerEmptyStateForSingleLeafLayout: a tab with one leaf
-// has zero interiors. The divider view shows an empty-state message; tab/+/-
-// are no-ops.
+// has zero interiors. The LAYOUT view (default mode) shows an empty-state
+// message; tab/+/- are no-ops.
 func TestLayoutEditor_DividerEmptyStateForSingleLeafLayout(t *testing.T) {
 	lay := &layout.Layout{
 		Name: "solo",
@@ -469,17 +492,16 @@ func TestLayoutEditor_DividerEmptyStateForSingleLeafLayout(t *testing.T) {
 	}
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "solo", "/tmp/solo", "triple")
-	m = pressKey(t, m, "ctrl+l")
 
 	if m.layoutEditor.mode != modeDivider {
-		t.Fatalf("toggle did not enter divider mode: mode=%v", m.layoutEditor.mode)
+		t.Fatalf("default mode = %v, want modeDivider", m.layoutEditor.mode)
 	}
 	if got := len(m.layoutEditor.interiors); got != 0 {
 		t.Errorf("interiors = %d, want 0", got)
 	}
 	// View must mention the empty state — anchor on a stable substring.
 	if !strings.Contains(m.View(), "no dividers") {
-		t.Errorf("divider view missing empty-state hint. View:\n%s", m.View())
+		t.Errorf("LAYOUT view missing empty-state hint. View:\n%s", m.View())
 	}
 	// Bumps must not panic and must not invent a phantom interior. Final
 	// assignment is to the same model — ignore the result, the side-effect
@@ -501,57 +523,142 @@ func approxEq(a, b float64) bool {
 }
 
 // TestLayoutEditor_AllDividerKeysAreInertInLeafMode is the table-driven sibling
-// of TestLayoutEditor_DividerKeysAreInertInLeafMode: every printable divider
-// key falls through to the textinput in leaf mode and never mutates Size. This
-// pins the "don't eat printable chars" contract for the full key set, not just
-// "+".
+// of TestLayoutEditor_DividerKeysAreInertInLeafMode: every printable LAYOUT-
+// mode key falls through to the textinput in COMMAND mode and never mutates
+// Size. Pins the "don't eat printable chars" contract for the full key set,
+// including "c" (which is the LAYOUT-mode shortcut to enter COMMAND mode —
+// but in COMMAND mode it must be a literal letter).
 func TestLayoutEditor_AllDividerKeysAreInertInLeafMode(t *testing.T) {
-	cases := []string{"+", "=", "-", "_", "0"}
+	cases := []string{"+", "=", "-", "_", "0", "c"}
 	for _, k := range cases {
 		t.Run(k, func(t *testing.T) {
 			lay := fixedLayout()
 			m, _ := editorModelWithResolver(t, lay)
 			openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
-			// Leaf mode by default.
+			m = pressKey(t, m, "c") // → COMMAND mode
+			// Verify mode flip happened; otherwise the assertions below are
+			// vacuous.
+			if m.layoutEditor.mode != modeLeaf {
+				t.Fatalf("setup: failed to enter COMMAND mode, got %v", m.layoutEditor.mode)
+			}
 			m = pressKey(t, m, k)
 			if got := m.layoutEditor.interiors[0].split.Size; got != 0 {
-				t.Errorf("leaf-mode %q: Size mutated to %v, want 0", k, got)
+				t.Errorf("COMMAND-mode %q: Size mutated to %v, want 0", k, got)
 			}
 			if got := m.layoutEditor.cmdInput.Value(); got != k {
-				t.Errorf("leaf-mode %q: textinput = %q, want %q", k, got, k)
+				t.Errorf("COMMAND-mode %q: textinput = %q, want %q", k, got, k)
 			}
 		})
 	}
 }
 
-// TestLayoutEditor_ToggleModeFlushesInFlightCommand: typing into the textinput
-// then toggling to divider mode (without an explicit save) must persist the
-// typed text to the active leaf's Command. Otherwise users would silently lose
-// edits when pressing ctrl+l mid-type. Verifies the invariant by then applying
-// (ctrl+s) and checking the materialised layout.
-func TestLayoutEditor_ToggleModeFlushesInFlightCommand(t *testing.T) {
+// TestLayoutEditor_ExitCommandModeFlushesInFlightCommand: typing into the
+// textinput then pressing enter (or esc) to exit COMMAND mode must persist
+// the typed text to the active leaf's Command. Otherwise users would silently
+// lose edits when finishing a command edit. Verifies the invariant by then
+// applying (ctrl+s) and checking the materialised layout.
+func TestLayoutEditor_ExitCommandModeFlushesInFlightCommand(t *testing.T) {
+	for _, exitKey := range []string{"enter", "esc"} {
+		t.Run(exitKey, func(t *testing.T) {
+			lay := fixedLayout()
+			m, _ := editorModelWithResolver(t, lay)
+			openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
+			m = pressKey(t, m, "c") // enter COMMAND mode
+
+			for _, r := range "vim" {
+				m = pressKey(t, m, string(r))
+			}
+			// Exit back to LAYOUT mode without an explicit save.
+			m = pressKey(t, m, exitKey)
+			if m.layoutEditor.mode != modeDivider {
+				t.Fatalf("after %s: mode=%v, want modeDivider (must return to LAYOUT)", exitKey, m.layoutEditor.mode)
+			}
+			// Dispatch — the only way "vim" survives to here is if
+			// exitCommandMode flushed it; saveCurrent in apply is a no-op now
+			// (we're in LAYOUT mode).
+			m = pressKey(t, m, "ctrl+s")
+
+			intent, ok := m.intent.(NewProjectIntent)
+			if !ok || intent.MaterialisedLayout == nil {
+				t.Fatalf("intent = %#v, want NewProjectIntent with MaterialisedLayout", m.intent)
+			}
+			leaves := layout.LeafPointers(&intent.MaterialisedLayout.Tabs[0].Root)
+			if len(leaves) == 0 {
+				t.Fatalf("no leaves on persisted layout")
+			}
+			if got := leaves[0].Command; got != "vim" {
+				t.Errorf("first leaf Command = %q, want %q (%s must flush in-flight typed text)", got, "vim", exitKey)
+			}
+		})
+	}
+}
+
+// TestLayoutEditor_DefaultModeIsLayout pins the entry mode. Most users want
+// to nudge sizes, not type commands; opening straight into a focused
+// textinput is more friction than landing on a navigable preview.
+func TestLayoutEditor_DefaultModeIsLayout(t *testing.T) {
 	lay := fixedLayout()
 	m, _ := editorModelWithResolver(t, lay)
 	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
+	if m.layoutEditor.mode != modeDivider {
+		t.Errorf("default mode = %v, want modeDivider (LAYOUT). Users should land in navigation mode, not a focused textinput.", m.layoutEditor.mode)
+	}
+	if m.layoutEditor.cmdInput.Focused() {
+		t.Errorf("cmdInput.Focused() = true, want false (no textinput should grab keys on entry)")
+	}
+}
 
-	for _, r := range "vim" {
-		m = pressKey(t, m, string(r))
-	}
-	// Toggle to divider mode without an explicit save.
-	m = pressKey(t, m, "ctrl+l")
-	// Dispatch — saveCurrent in apply is a no-op now (we're in divider mode),
-	// so the only way "vim" survives is if toggleMode flushed it.
-	m = pressKey(t, m, "ctrl+s")
+// TestLayoutEditor_EscIsModeAwareCorrectScreen pins the dual meaning of esc:
+//   - COMMAND mode: commit & return to LAYOUT mode (stays in the editor)
+//   - LAYOUT mode: exit the editor back to the form
+//
+// A regression that lost the mode-gate would either trap the user in COMMAND
+// mode (esc does nothing) or make a single esc from inside the textinput blow
+// the editor away (losing context).
+func TestLayoutEditor_EscIsModeAwareCorrectScreen(t *testing.T) {
+	t.Run("esc in COMMAND mode returns to LAYOUT and stays in editor", func(t *testing.T) {
+		lay := fixedLayout()
+		m, _ := editorModelWithResolver(t, lay)
+		openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
+		m = pressKey(t, m, "c")
+		m = pressKey(t, m, "esc")
+		if m.layoutEditor.mode != modeDivider {
+			t.Errorf("mode = %v, want modeDivider", m.layoutEditor.mode)
+		}
+		if m.screen != screenLayoutEditor {
+			t.Errorf("screen = %v, want screenLayoutEditor (esc in COMMAND must NOT exit the editor)", m.screen)
+		}
+	})
+	t.Run("esc in LAYOUT mode exits the editor to the form", func(t *testing.T) {
+		lay := fixedLayout()
+		m, _ := editorModelWithResolver(t, lay)
+		openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
+		// Default is LAYOUT mode — no setup needed.
+		m = pressKey(t, m, "esc")
+		if m.screen != screenForm {
+			t.Errorf("screen = %v, want screenForm (esc in LAYOUT must exit the editor)", m.screen)
+		}
+	})
+}
 
-	intent, ok := m.intent.(NewProjectIntent)
-	if !ok || intent.MaterialisedLayout == nil {
-		t.Fatalf("intent = %#v, want NewProjectIntent with MaterialisedLayout", m.intent)
+// TestLayoutEditor_EnterCommandFocusesInput pins that entering COMMAND mode
+// actually focuses the textinput. Without focus, the bubbles textinput drops
+// every keystroke and users would see an empty input no matter what they
+// type — silent failure mode.
+func TestLayoutEditor_EnterCommandFocusesInput(t *testing.T) {
+	lay := fixedLayout()
+	m, _ := editorModelWithResolver(t, lay)
+	openLayoutEditorViaForm(t, m, "myproj", "/tmp/myproj", "triple")
+	if m.layoutEditor.cmdInput.Focused() {
+		t.Fatalf("precondition: cmdInput already focused before entering COMMAND mode")
 	}
-	leaves := layout.LeafPointers(&intent.MaterialisedLayout.Tabs[0].Root)
-	if len(leaves) == 0 {
-		t.Fatalf("no leaves on persisted layout")
+	m = pressKey(t, m, "c")
+	if !m.layoutEditor.cmdInput.Focused() {
+		t.Errorf("after c: cmdInput.Focused() = false, want true (input must accept keystrokes)")
 	}
-	if got := leaves[0].Command; got != "vim" {
-		t.Errorf("first leaf Command = %q, want %q (toggle must flush in-flight typed text)", got, "vim")
+	// Typing should land in the input.
+	m = pressKey(t, m, "v")
+	if got := m.layoutEditor.cmdInput.Value(); got != "v" {
+		t.Errorf("after typing 'v': cmdInput value = %q, want %q", got, "v")
 	}
 }
