@@ -43,7 +43,7 @@
 //     scripting). If unavailable, falls back to a hard-coded approximation
 //     so the feature degrades gracefully rather than failing.
 //   - For each interior node with `size`, focuses the leftmost-leaf of the
-//     SECOND child (b above) and issues `perform action "resize_split:<dir>,N"`
+//     SECOND child (b above) and issues `performAction "resize_split:<dir>,N"`
 //     where N is computed from `size`, the parent extent in pixels, and the
 //     current 50/50 division created by `app.split`.
 //   - Walks tree in DFS pre-order so outer dividers move before inner ones;
@@ -297,7 +297,7 @@
         const action = d.flipped ? flippedAction(p.action) : p.action;
         const cmd = "resize_split:" + action + "," + d.abs;
         try {
-          app.perform(cmd, { on: p.term });
+          app.performAction(cmd, { on: p.term });
         } catch (_) { /* best-effort: a single failed resize shouldn't sink the open */ }
       }
     }
