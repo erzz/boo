@@ -79,9 +79,9 @@ brews:
     license: "MIT"
     # Skip pushing the formula for snapshot / pre-release builds.
     skip_upload: auto
-    # Inject a depends_on :macos guard so Homebrew refuses to install on Linux.
-    custom_block: |
-      depends_on :macos
+    # GoReleaser auto-emits `depends_on :macos` because builds.goos is darwin-only.
+    # Do NOT add a custom_block guard — it produces a duplicate `depends_on :macos`
+    # and Homebrew refuses to install the formula.
     caveats: |
       boo requires Ghostty to be installed on your Mac:
         https://ghostty.org
