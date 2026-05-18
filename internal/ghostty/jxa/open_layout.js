@@ -152,13 +152,21 @@
     function recordResize(node, secondChildLeafTerm) {
       if (!node || !node.direction || typeof node.size !== "number") return;
       if (node.size <= 0 || node.size >= 1) return;
-      // Direction of the resize_split action: move the SECOND child's near
-      // edge in the OPPOSITE direction of the split. row → second child's
-      // left edge moves; column → second child's top edge moves. Positive
-      // delta from ResizeDeltaPixels means "grow first child"; we map that
-      // to "move second child's near edge AWAY from the first child", which
-      // is `left` for row and `up` for column.
-      const action = node.direction === "row" ? "left" : "up";
+      // The resize_split action grows the FOCUSED pane in the named
+      // direction. We focus the SECOND child's leftmost leaf, so to grow the
+      // FIRST child (Size > 0.5) we need to SHRINK the second child — which
+      // means pushing the second child's near edge AWAY from itself toward
+      // the divider. For a row split that's "right" (second pane gives up
+      // space on its left, divider moves right, first child grows); for a
+      // column split that's "down". Negative deltas (Size < 0.5) flip to
+      // the opposite direction via flippedAction.
+      //
+      // Beware the inversion: Ghostty's resize_split:left,N grows the
+      // focused pane LEFTWARD, i.e. shrinks the first child when the focus
+      // is on the second. Don't be tempted to "fix" the action names below
+      // without re-deriving from a sized test (e.g. size=0.7 should grow
+      // the first child to 70% of the parent extent).
+      const action = node.direction === "row" ? "right" : "down";
       pendingResizes.push({ node: node, term: secondChildLeafTerm, action: action });
     }
 
