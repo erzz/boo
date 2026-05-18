@@ -21,23 +21,62 @@ type leafRef struct {
 	split        *layout.Split
 }
 
+// interiorRef points at one interior (split) node in a multi-tab layout. Same
+// shape as leafRef but indexes against InteriorPointers / Region.NodeIndex.
+type interiorRef struct {
+	tabIdx       int
+	nodeIdxInTab int
+	split        *layout.Split
+}
+
+// editorMode picks which set of nodes the editor cycles over and which fields
+// are bound to keystrokes. Modes are independent — the leaf cursor and divider
+// cursor each remember their own position so toggling back and forth doesn't
+// reset them.
+type editorMode int
+
+const (
+	modeLeaf    editorMode = iota // tab cycles leaves, textinput edits Command
+	modeDivider                   // tab cycles interior nodes, +/- adjust Size
+)
+
+// sizeStep is how much one +/- press changes the first child's share. 0.05
+// gives 19 stops between sizeMin and sizeMax — enough granularity for common
+// "60/40" or "30/70" layouts without making the user mash the key.
+const sizeStep = 0.05
+
+// sizeMin / sizeMax bracket the editable Size range. The validator allows
+// (0,1) exclusive; we keep a 5% margin so a one-press accidental adjustment
+// doesn't crush a pane to invisibility.
+const (
+	sizeMin = 0.05
+	sizeMax = 0.95
+)
+
 // layoutEditorModel is the post-form-submit sub-screen that lets the user
-// customise per-pane commands on the resolved layout before the project is
-// written. It walks the layout's leaves in DFS order (one flat sequence
-// across all tabs) and exposes a single textinput bound to the active leaf's
-// Command. Other leaf fields (cwd, env, initial_input) and divider sizes are
-// out of scope for v1; users hand-edit YAML for those.
+// customise per-pane commands and divider proportions on the resolved layout
+// before the project is written. It walks both the layout's leaves and its
+// interior nodes in DFS order (one flat sequence per kind, across all tabs);
+// the active mode picks which list is being cycled. Other leaf fields
+// (cwd, env, initial_input) and structural changes (direction, restructuring)
+// are out of scope; users hand-edit YAML for those.
 //
 // Lifetime: constructed in openLayoutEditor with the resolver's output, then
-// either dispatched (Apply) or discarded (Skip) — the resolver returns a
+// either dispatched (Apply) or discarded (Back) — the resolver returns a
 // fresh tree each call, so no defensive cloning is needed.
 type layoutEditorModel struct {
 	projectName  string
 	templateName string
 	lay          *layout.Layout
-	leaves       []leafRef
-	currentIdx   int
-	cmdInput     textinput.Model
+
+	mode editorMode
+
+	leaves     []leafRef
+	currentIdx int
+	cmdInput   textinput.Model
+
+	interiors   []interiorRef
+	interiorIdx int
 }
 
 // editorPreviewWidth is the column budget for the embedded layout preview.
@@ -46,9 +85,11 @@ const editorPreviewWidth = 50
 
 // newLayoutEditorModel builds the sub-screen state. Callers must pass a layout
 // they own — the editor mutates it in place. An empty `leaves` slice is valid
-// (degenerate single-leaf layout still produces one entry).
+// (degenerate single-leaf layout still produces one entry); empty `interiors`
+// is also valid (single-leaf layouts have no dividers).
 func newLayoutEditorModel(projectName, templateName string, lay *layout.Layout) layoutEditorModel {
 	leaves := collectLeaves(lay)
+	interiors := collectInteriors(lay)
 	ti := textinput.New()
 	ti.Placeholder = "(no command — runs $SHELL)"
 	ti.Prompt = "  "
@@ -62,9 +103,12 @@ func newLayoutEditorModel(projectName, templateName string, lay *layout.Layout) 
 		projectName:  projectName,
 		templateName: templateName,
 		lay:          lay,
+		mode:         modeLeaf,
 		leaves:       leaves,
 		currentIdx:   0,
 		cmdInput:     ti,
+		interiors:    interiors,
+		interiorIdx:  0,
 	}
 }
 
@@ -85,6 +129,24 @@ func collectLeaves(lay *layout.Layout) []leafRef {
 	return out
 }
 
+// collectInteriors walks every tab in DFS pre-order, recording each interior
+// node. Order matches layout.InteriorPointers and the renderer's Region
+// NodeIndex sequence so the highlight overlay can find the active interior
+// within the active tab.
+func collectInteriors(lay *layout.Layout) []interiorRef {
+	if lay == nil {
+		return nil
+	}
+	var out []interiorRef
+	for ti := range lay.Tabs {
+		ptrs := layout.InteriorPointers(&lay.Tabs[ti].Root)
+		for ni, p := range ptrs {
+			out = append(out, interiorRef{tabIdx: ti, nodeIdxInTab: ni, split: p})
+		}
+	}
+	return out
+}
+
 // saveCurrent commits the textinput value to the active leaf's Command. Called
 // before any leaf transition (cycle, apply) so edits aren't lost when the user
 // moves on without an explicit save.
@@ -95,28 +157,96 @@ func (e *layoutEditorModel) saveCurrent() {
 	e.leaves[e.currentIdx].split.Command = e.cmdInput.Value()
 }
 
-// cycle advances by delta (-1/+1) with wraparound, persisting the current
-// textinput value first. Resets the textinput to the new leaf's Command so
-// each leaf has its own value rather than sharing one buffer.
+// cycle advances by delta (-1/+1) with wraparound. In leaf mode it persists
+// the current textinput value first and then loads the new leaf's command into
+// the input. In divider mode it simply moves the interior cursor — there is no
+// in-flight buffer to flush because Size edits are applied directly.
 func (e *layoutEditorModel) cycle(delta int) {
-	if len(e.leaves) <= 1 {
-		return
+	switch e.mode {
+	case modeLeaf:
+		if len(e.leaves) <= 1 {
+			return
+		}
+		e.saveCurrent()
+		n := len(e.leaves)
+		e.currentIdx = (e.currentIdx + delta + n) % n
+		e.cmdInput.SetValue(e.leaves[e.currentIdx].split.Command)
+		e.cmdInput.CursorEnd()
+	case modeDivider:
+		if len(e.interiors) <= 1 {
+			return
+		}
+		n := len(e.interiors)
+		e.interiorIdx = (e.interiorIdx + delta + n) % n
 	}
-	e.saveCurrent()
-	n := len(e.leaves)
-	e.currentIdx = (e.currentIdx + delta + n) % n
-	e.cmdInput.SetValue(e.leaves[e.currentIdx].split.Command)
-	e.cmdInput.CursorEnd()
 }
 
-// view renders the editor: header, highlighted layout preview, current-leaf
-// label, command input, footer. width is the terminal width; passed in so the
-// textinput can scale rather than overflow on narrow terminals.
+// toggleMode flips between leaf and divider modes. Persists any in-flight
+// command edit before leaving leaf mode so the user doesn't lose typed text.
+// If the layout has no interiors the toggle still works (the divider view
+// will show an empty-state message), but typically users will only encounter
+// it in interesting (multi-pane) layouts.
+func (e *layoutEditorModel) toggleMode() {
+	if e.mode == modeLeaf {
+		e.saveCurrent()
+		e.mode = modeDivider
+		return
+	}
+	e.mode = modeLeaf
+	// Restore the textinput to whatever the active leaf currently holds; the
+	// user can't have edited it from divider mode but a future feature might.
+	if e.currentIdx >= 0 && e.currentIdx < len(e.leaves) {
+		e.cmdInput.SetValue(e.leaves[e.currentIdx].split.Command)
+		e.cmdInput.CursorEnd()
+	}
+}
+
+// bumpSize nudges the active interior's Size by delta, clamped to
+// [sizeMin, sizeMax]. A previously-zero Size (meaning "split evenly") is
+// promoted to 0.5 before applying the delta so the first press moves
+// visibly rather than landing on an off-by-one fraction.
+func (e *layoutEditorModel) bumpSize(delta float64) {
+	if e.mode != modeDivider {
+		return
+	}
+	if e.interiorIdx < 0 || e.interiorIdx >= len(e.interiors) {
+		return
+	}
+	s := e.interiors[e.interiorIdx].split
+	cur := s.Size
+	if cur == 0 {
+		cur = 0.5
+	}
+	cur += delta
+	if cur < sizeMin {
+		cur = sizeMin
+	}
+	if cur > sizeMax {
+		cur = sizeMax
+	}
+	s.Size = cur
+}
+
+// resetSize clears the active interior's Size back to 0 ("split evenly"). The
+// JSON tag is `omitempty` so a reset value also drops cleanly out of the YAML.
+func (e *layoutEditorModel) resetSize() {
+	if e.mode != modeDivider {
+		return
+	}
+	if e.interiorIdx < 0 || e.interiorIdx >= len(e.interiors) {
+		return
+	}
+	e.interiors[e.interiorIdx].split.Size = 0
+}
+
+// view renders the editor: header, highlighted layout preview, current-node
+// label, mode-specific controls, footer. width is the terminal width; passed
+// in so the textinput can scale rather than overflow on narrow terminals.
 func (e layoutEditorModel) view(t Theme, width int) string {
 	var b strings.Builder
 	b.WriteString(t.RightPaneTitle.Render(fmt.Sprintf("Customise layout — %s", e.projectName)))
 	b.WriteString("\n")
-	b.WriteString(t.RightPaneFaint.Render(fmt.Sprintf("template: %s", e.templateName)))
+	b.WriteString(t.RightPaneFaint.Render(fmt.Sprintf("template: %s · mode: %s", e.templateName, modeName(e.mode))))
 	b.WriteString("\n\n")
 
 	if len(e.leaves) == 0 {
@@ -129,7 +259,33 @@ func (e layoutEditorModel) view(t Theme, width int) string {
 	b.WriteString(e.renderPreview(t))
 	b.WriteString("\n")
 
-	// Current-leaf label.
+	switch e.mode {
+	case modeLeaf:
+		e.renderLeafControls(&b, t, width)
+	case modeDivider:
+		e.renderDividerControls(&b, t)
+	}
+
+	b.WriteString("\n\n")
+	b.WriteString(t.RightPaneFaint.Render(
+		"[tab/shift+tab] cycle · [ctrl+l] toggle mode · [ctrl+s] save & create · [esc] back to form"))
+	return wrapEditorFrame(b.String())
+}
+
+// modeName is a short human label for the status header.
+func modeName(m editorMode) string {
+	switch m {
+	case modeDivider:
+		return "divider (sizes)"
+	default:
+		return "leaf (commands)"
+	}
+}
+
+// renderLeafControls draws the per-leaf label and the command textinput.
+// Mutates the receiver's textinput Width as a side effect — same pattern the
+// pre-M4 view used; cheap and avoids threading width through the model.
+func (e layoutEditorModel) renderLeafControls(b *strings.Builder, t Theme, width int) {
 	cur := e.leaves[e.currentIdx]
 	label := fmt.Sprintf("Pane %d/%d", e.currentIdx+1, len(e.leaves))
 	if len(e.lay.Tabs) > 1 {
@@ -138,7 +294,6 @@ func (e layoutEditorModel) view(t Theme, width int) string {
 	b.WriteString(t.RightPaneTitle.Render(label))
 	b.WriteString("\n")
 
-	// Resize the textinput to fit the terminal. Mirrors form.setSize math.
 	inputWidth := width - 6
 	if inputWidth < 20 {
 		inputWidth = 20
@@ -148,11 +303,55 @@ func (e layoutEditorModel) view(t Theme, width int) string {
 	b.WriteString(t.RightPaneLabel.Render("  command (blank = $SHELL):"))
 	b.WriteString("\n")
 	b.WriteString(e.cmdInput.View())
-	b.WriteString("\n\n")
+}
 
-	b.WriteString(t.RightPaneFaint.Render(
-		"[tab/shift+tab] cycle pane · [ctrl+s] save & create · [esc] back to form"))
-	return wrapEditorFrame(b.String())
+// renderDividerControls draws the per-interior label, current Size as a
+// percentage + bar, and the divider keymap. Empty-state when the layout has
+// no interiors at all (single-leaf tabs only).
+func (e layoutEditorModel) renderDividerControls(b *strings.Builder, t Theme) {
+	if len(e.interiors) == 0 {
+		b.WriteString(t.RightPaneFaint.Render("(no dividers — layout is all single panes)"))
+		return
+	}
+	cur := e.interiors[e.interiorIdx]
+	label := fmt.Sprintf("Divider %d/%d (%s)", e.interiorIdx+1, len(e.interiors), cur.split.Direction)
+	if len(e.lay.Tabs) > 1 {
+		label += fmt.Sprintf(" (tab %d)", cur.tabIdx+1)
+	}
+	b.WriteString(t.RightPaneTitle.Render(label))
+	b.WriteString("\n")
+
+	frac := cur.split.Size
+	explicit := frac != 0
+	if !explicit {
+		frac = 0.5
+	}
+	b.WriteString(t.RightPaneLabel.Render("  first child share:"))
+	b.WriteString("\n  ")
+	b.WriteString(sizeBar(frac, 30))
+	fmt.Fprintf(b, "  %d%%", int(frac*100+0.5))
+	if !explicit {
+		b.WriteString(t.RightPaneFaint.Render("  (default — split evenly)"))
+	}
+	b.WriteString("\n  ")
+	b.WriteString(t.RightPaneFaint.Render("[+/-] adjust 5% · [0] reset to even"))
+}
+
+// sizeBar renders a fixed-width bar showing the first child's fractional
+// share. The split point is drawn as a vertical bar between the two halves.
+func sizeBar(frac float64, width int) string {
+	if width < 4 {
+		width = 4
+	}
+	left := int(frac*float64(width) + 0.5)
+	if left < 1 {
+		left = 1
+	}
+	if left > width-1 {
+		left = width - 1
+	}
+	right := width - left
+	return "[" + strings.Repeat("=", left) + "|" + strings.Repeat("=", right) + "]"
 }
 
 // wrapEditorFrame wraps the editor body in the same rounded border as
@@ -164,22 +363,28 @@ func wrapEditorFrame(body string) string {
 		Render(body)
 }
 
-// renderPreview renders each tab as its own annotated block, with the active
-// leaf's region overlaid in reverse video so the user can see which pane the
-// command input edits.
+// renderPreview renders each tab as its own annotated block. The active node
+// (leaf in leaf mode, interior in divider mode) is overlaid in reverse video
+// in its tab so the user can see which node the controls below operate on.
 func (e layoutEditorModel) renderPreview(t Theme) string {
-	cur := e.leaves[e.currentIdx]
+	activeTab, leafHL, nodeHL := e.activeRegionTargets()
 	var blocks []string
 	for ti := range e.lay.Tabs {
 		tab := e.lay.Tabs[ti]
 		h := tabPreviewHeight(tab)
 		grid, regions := layoutpreview.RenderTabAnnotated(tab, editorPreviewWidth, h)
 		var highlight *layoutpreview.Region
-		if ti == cur.tabIdx {
+		if ti == activeTab {
 			for i := range regions {
-				if regions[i].LeafIndex == cur.leafIdxInTab {
+				switch {
+				case leafHL >= 0 && regions[i].LeafIndex == leafHL:
 					r := regions[i]
 					highlight = &r
+				case nodeHL >= 0 && regions[i].NodeIndex == nodeHL:
+					r := regions[i]
+					highlight = &r
+				}
+				if highlight != nil {
 					break
 				}
 			}
@@ -195,6 +400,28 @@ func (e layoutEditorModel) renderPreview(t Theme) string {
 		blocks = append(blocks, t.RightPaneFaint.Render(title)+"\n"+body)
 	}
 	return strings.Join(blocks, "\n\n") + "\n"
+}
+
+// activeRegionTargets reports which tab to highlight in, and which kind of
+// region to look up. Returns -1 for the kind that isn't active. Returns
+// (-1, -1, -1) when there's nothing to highlight (empty leaves / interiors
+// in the active mode).
+func (e layoutEditorModel) activeRegionTargets() (tabIdx, leafIdx, nodeIdx int) {
+	switch e.mode {
+	case modeLeaf:
+		if len(e.leaves) == 0 {
+			return -1, -1, -1
+		}
+		cur := e.leaves[e.currentIdx]
+		return cur.tabIdx, cur.leafIdxInTab, -1
+	case modeDivider:
+		if len(e.interiors) == 0 {
+			return -1, -1, -1
+		}
+		cur := e.interiors[e.interiorIdx]
+		return cur.tabIdx, -1, cur.nodeIdxInTab
+	}
+	return -1, -1, -1
 }
 
 // tabPreviewHeight chooses a render height proportional to the tab's column
@@ -257,20 +484,22 @@ func overlayHighlight(grid string, r layoutpreview.Region, _ Theme) string {
 
 // updateLayoutEditor handles input on the editor sub-screen.
 //
-// Apply (ctrl+s): save current input, attach the materialised layout to the
-// pending intent, dispatch via runIntent (which will tea.Quit for NewProjectIntent).
-// Panes left blank are rendered as plain shells by the JXA walker — there is
-// no "skip" path because doing nothing in the editor already produces an
-// untouched layout.
+// Apply (ctrl+s): save current input (leaf mode) and dispatch the intent with
+// the materialised layout attached. Panes left blank are rendered as plain
+// shells by the JXA walker — there is no "skip" path because doing nothing in
+// the editor already produces an untouched layout.
 //
-// Back (esc): drop the in-flight edits and return to the form. The form's
-// state is preserved across the editor screen, so users land back on the
-// fields they filled in. From the form they can fix something and resubmit
-// (re-entering the editor) or cancel out entirely.
+// Back (esc): drop in-flight edits and return to the form.
 //
-// Cycle: tab/shift+tab move between leaves, persisting edits across moves.
+// Toggle mode (ctrl+l): switch between leaf (commands) and divider (sizes).
 //
-// Anything else: forwarded to the textinput (typing, cursor movement, etc).
+// Cycle (tab/shift+tab): move between leaves or interiors depending on mode.
+//
+// Divider mode keys (+ / - / 0): only fire when the editor is in divider mode;
+// in leaf mode they fall through to the textinput as plain characters.
+//
+// Anything else in leaf mode: forwarded to the textinput. Anything else in
+// divider mode: ignored.
 func (m *model) updateLayoutEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok {
 		pressed := km.String()
@@ -285,11 +514,36 @@ func (m *model) updateLayoutEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.applyLayoutEditor()
 		case matches(m.keys.LayoutEditBack, pressed):
 			return m.backToFormFromEditor()
+		case matches(m.keys.LayoutEditToggleMode, pressed):
+			m.layoutEditor.toggleMode()
+			return m, nil
+		}
+		// Divider-mode-only keys. Gating prevents +/-/0 from being eaten when
+		// the user is typing a command in leaf mode.
+		if m.layoutEditor.mode == modeDivider {
+			switch {
+			case matches(m.keys.LayoutEditSizeIncr, pressed):
+				m.layoutEditor.bumpSize(+sizeStep)
+				return m, nil
+			case matches(m.keys.LayoutEditSizeDecr, pressed):
+				m.layoutEditor.bumpSize(-sizeStep)
+				return m, nil
+			case matches(m.keys.LayoutEditSizeReset, pressed):
+				m.layoutEditor.resetSize()
+				return m, nil
+			}
+			// Anything else in divider mode is intentionally ignored — there
+			// is no textinput to forward to.
+			return m, nil
 		}
 	}
-	var cmd tea.Cmd
-	m.layoutEditor.cmdInput, cmd = m.layoutEditor.cmdInput.Update(msg)
-	return m, cmd
+	// Leaf-mode default: forward to the textinput.
+	if m.layoutEditor.mode == modeLeaf {
+		var cmd tea.Cmd
+		m.layoutEditor.cmdInput, cmd = m.layoutEditor.cmdInput.Update(msg)
+		return m, cmd
+	}
+	return m, nil
 }
 
 // applyLayoutEditor finalises the editor: persist the in-flight input value,

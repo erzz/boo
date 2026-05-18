@@ -31,10 +31,14 @@ type keyMap struct {
 	Switch  key.Binding // c on the AlreadyRegistered interstitial
 
 	// Layout editor sub-screen.
-	LayoutEditCycleNext key.Binding // tab — cycle to next leaf
-	LayoutEditCyclePrev key.Binding // shift+tab — cycle to previous leaf
-	LayoutEditApply     key.Binding // ctrl+s — apply customisation, dispatch intent (enter would conflict with textinput)
-	LayoutEditBack      key.Binding // esc — discard edits, return to the form
+	LayoutEditCycleNext  key.Binding // tab — cycle to next leaf / divider
+	LayoutEditCyclePrev  key.Binding // shift+tab — cycle to previous leaf / divider
+	LayoutEditApply      key.Binding // ctrl+s — apply customisation, dispatch intent (enter would conflict with textinput)
+	LayoutEditBack       key.Binding // esc — discard edits, return to the form
+	LayoutEditToggleMode key.Binding // ctrl+l — toggle between leaf (commands) and divider (sizes) mode
+	LayoutEditSizeIncr   key.Binding // + / = — increase first child's share by 5% (divider mode)
+	LayoutEditSizeDecr   key.Binding // - / _ — decrease first child's share by 5% (divider mode)
+	LayoutEditSizeReset  key.Binding // 0 — reset divider to "split evenly" (divider mode)
 }
 
 // defaultKeyMap returns the production bindings. Function (not var) so tests get fresh copies.
@@ -111,6 +115,26 @@ func defaultKeyMap() keyMap {
 		LayoutEditBack: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "back to form"),
+		),
+		LayoutEditToggleMode: key.NewBinding(
+			key.WithKeys("ctrl+l"),
+			key.WithHelp("ctrl+l", "toggle leaf/divider mode"),
+		),
+		LayoutEditSizeIncr: key.NewBinding(
+			// "=" is the same physical key as "+" on US layouts and avoids a
+			// shift requirement; non-US layouts that produce "+" without shift
+			// also work via the canonical "+" entry.
+			key.WithKeys("+", "="),
+			key.WithHelp("+", "grow first child"),
+		),
+		LayoutEditSizeDecr: key.NewBinding(
+			// "_" is shift+"-" on US; both produce useful keysyms across layouts.
+			key.WithKeys("-", "_"),
+			key.WithHelp("-", "shrink first child"),
+		),
+		LayoutEditSizeReset: key.NewBinding(
+			key.WithKeys("0"),
+			key.WithHelp("0", "split evenly"),
 		),
 	}
 }
