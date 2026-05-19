@@ -59,6 +59,12 @@ type DeleteIntent struct {
 	Purge bool
 }
 
+// KillIntent — user pressed K on a running project. Closes the Ghostty
+// window but leaves the project registered. Unlike DeleteIntent{Purge:true},
+// no confirm modal is shown: closing a window is reversible (just relaunch),
+// whereas deletion is not.
+type KillIntent struct{ Name string }
+
 // SetLayoutIntent — user picked a new template on the set-layout
 // sub-screen. The CLI re-resolves the template and writes both the
 // per-project layout snapshot and the registry's display field, same
@@ -96,6 +102,7 @@ type NewProjectIntent struct {
 
 func (SwitchIntent) isIntent()     {}
 func (DeleteIntent) isIntent()     {}
+func (KillIntent) isIntent()       {}
 func (SetLayoutIntent) isIntent()  {}
 func (EditIntent) isIntent()       {}
 func (NewProjectIntent) isIntent() {}
@@ -148,6 +155,11 @@ type Options struct {
 	// Confirmation/UX lives in the picker; CLI only performs the side effect.
 	OnDelete    func(name string, purge bool) (warnings []string, err error)
 	OnSetLayout func(name, template string) error
+	// OnKill closes the Ghostty window for the named project without
+	// touching the registry. Called when the user presses K on a project
+	// the picker believes is running (Status == "running"). nil = key
+	// disabled and hidden from help.
+	OnKill func(name string) error
 	// OnEdit applies an edit. Receives original key (oldName) plus desired post-edit values.
 	// nil = 'e' key disabled.
 	OnEdit func(oldName, newName, newDir, newTemplate string) error
@@ -226,6 +238,9 @@ func Run(items []Item, opts Options) (Result, error) {
 		if opts.OnDelete != nil {
 			out = append(out, keys.Delete, keys.Purge)
 		}
+		if opts.OnKill != nil {
+			out = append(out, keys.Kill)
+		}
 		if opts.ConfigPath != "" {
 			out = append(out, keys.CycleTheme)
 		}
@@ -267,6 +282,7 @@ func Run(items []Item, opts Options) (Result, error) {
 		layoutNames:           opts.LayoutNames,
 		onDelete:              opts.OnDelete,
 		onSetLayout:           opts.OnSetLayout,
+		onKill:                opts.OnKill,
 		onEdit:                opts.OnEdit,
 		onOpenLayout:          opts.OnOpenLayout,
 		onLaunch:              opts.OnLaunch,
@@ -371,6 +387,7 @@ type model struct {
 	// the user dismisses it with any key.
 	onDelete      func(name string, purge bool) (warnings []string, err error)
 	onSetLayout   func(name, template string) error
+	onKill        func(name string) error
 	onEdit        func(oldName, newName, newDir, newTemplate string) error
 	onOpenLayout  func(name string) tea.Cmd
 	onLaunch      func(name string) tea.Cmd
@@ -701,6 +718,23 @@ func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.openDeleteConfirm(it, true)
 					return m, nil
 				}
+			case matches(m.keys.Kill, pressed):
+				if m.onKill == nil {
+					break
+				}
+				it, ok := m.list.SelectedItem().(Item)
+				if !ok {
+					break
+				}
+				// Gated on Status == "running": pressing K on a stopped
+				// project would either error from CloseWindow or no-op
+				// silently. Both are user-hostile; a faint status hint
+				// makes the affordance discoverable without surprise.
+				if it.Status != "running" {
+					m.setStatusErr(fmt.Sprintf("%s is not running", it.Key))
+					return m, nil
+				}
+				return m.runIntent(KillIntent{Name: it.Key})
 			case matches(m.keys.SetLayout, pressed):
 				if m.onSetLayout == nil {
 					break
@@ -873,6 +907,17 @@ func (m *model) runIntent(in Intent) (tea.Model, tea.Cmd) {
 		default:
 			m.setStatusOK(fmt.Sprintf("deleted %s", v.Name))
 		}
+		m.screen = screenList
+		return m, m.startEnrich()
+	case KillIntent:
+		if m.onKill == nil {
+			m.screen = screenList
+			return m, nil
+		}
+		if err := m.onKill(v.Name); err != nil {
+			return m.showError(fmt.Sprintf("kill %q: %v", v.Name, err)), nil
+		}
+		m.setStatusOK(fmt.Sprintf("closed window for %s", v.Name))
 		m.screen = screenList
 		return m, m.startEnrich()
 	case SetLayoutIntent:

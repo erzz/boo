@@ -496,3 +496,100 @@ func TestEnrichment_OldResultIgnored(t *testing.T) {
 		t.Errorf("fresh enrichment (gen=2) not applied: Status = %q, want %q", it2.Status, "running")
 	}
 }
+
+// K on a running item must invoke onKill, update the status bar, and
+// trigger a list re-enrich so the running/stopped pill is fresh.
+func TestUpdateList_KillKey_RunningProject_InvokesOnKill(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha", Status: "running"}
+	m := newTestModel(alpha)
+	called := ""
+	m.onKill = func(name string) error {
+		called = name
+		return nil
+	}
+	refreshed := false
+	m.refreshItems = func() ([]Item, error) {
+		refreshed = true
+		return []Item{{Key: "alpha", Title: "alpha", Status: "stopped"}}, nil
+	}
+
+	updated, cmd := m.updateList(keyMsg("K"))
+	mm := updated.(*model)
+	// startEnrich returns a tea.Cmd; invoking it triggers the refresh callback.
+	if cmd != nil {
+		_ = cmd()
+	}
+
+	if called != "alpha" {
+		t.Errorf("onKill called with %q, want %q", called, "alpha")
+	}
+	if !refreshed {
+		t.Error("expected refreshItems to be invoked after successful kill")
+	}
+	if mm.status.isErr {
+		t.Errorf("status should not be an error: %q", mm.status.text)
+	}
+	const want = "closed window for alpha"
+	if !strings.Contains(mm.status.text, want) {
+		t.Errorf("status = %q, want it to contain %q", mm.status.text, want)
+	}
+}
+
+// K on a stopped item must NOT invoke onKill — there is no window to close.
+// Picker surfaces a faint hint via the status bar instead.
+func TestUpdateList_KillKey_StoppedProject_NoOp(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha", Status: "stopped"}
+	m := newTestModel(alpha)
+	called := false
+	m.onKill = func(name string) error {
+		called = true
+		return nil
+	}
+
+	updated, _ := m.updateList(keyMsg("K"))
+	mm := updated.(*model)
+
+	if called {
+		t.Error("onKill must not be invoked when Status != running")
+	}
+	if !mm.status.isErr {
+		t.Errorf("status should flag the no-op as an error hint; got %q (isErr=%v)", mm.status.text, mm.status.isErr)
+	}
+}
+
+// K when onKill is nil must be a silent no-op (binding is disabled in help too).
+func TestUpdateList_KillKey_NoCallback_Disabled(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha", Status: "running"}
+	m := newTestModel(alpha)
+	// m.onKill left nil intentionally.
+
+	updated, _ := m.updateList(keyMsg("K"))
+	mm := updated.(*model)
+
+	if mm.status.text != "" {
+		t.Errorf("status should stay empty when onKill is unwired; got %q", mm.status.text)
+	}
+}
+
+// runIntent(KillIntent) with a failing onKill must surface the error screen
+// and skip the refresh — mirrors the Delete error-path contract.
+func TestRunIntent_Kill_ErrorShowsErrorScreen(t *testing.T) {
+	alpha := Item{Key: "alpha", Title: "alpha", Status: "running"}
+	m := newTestModel(alpha)
+	m.onKill = func(name string) error { return errors.New("osascript timeout") }
+	refreshed := false
+	m.refreshItems = func() ([]Item, error) {
+		refreshed = true
+		return []Item{}, nil
+	}
+
+	updated, _ := m.runIntent(KillIntent{Name: "alpha"})
+	mm := updated.(*model)
+
+	if mm.screen != screenError {
+		t.Errorf("screen = %v, want screenError", mm.screen)
+	}
+	if refreshed {
+		t.Error("refreshItems must not be called when onKill returns an error")
+	}
+}

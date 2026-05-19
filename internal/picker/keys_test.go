@@ -17,6 +17,7 @@ func TestKeyMap_AllBindingsHaveKeys(t *testing.T) {
 		"Select":  {k.Select.Keys()},
 		"Quit":    {k.Quit.Keys()},
 		"New":     {k.New.Keys()},
+		"Kill":    {k.Kill.Keys()},
 		"Cancel":  {k.Cancel.Keys()},
 		"Confirm": {k.Confirm.Keys()},
 		"Switch":  {k.Switch.Keys()},

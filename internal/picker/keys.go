@@ -16,6 +16,7 @@ type keyMap struct {
 	OpenLayout key.Binding // o — open layout YAML in $EDITOR
 	Delete     key.Binding // d — confirm modal, DeleteIntent{Purge:false}
 	Purge      key.Binding // D — same but Purge:true (close window too)
+	Kill       key.Binding // K — close the Ghostty window of the selected running project (project record kept)
 	SetLayout  key.Binding // l — layout cycler sub-screen
 
 	// List screen — global UI controls.
@@ -72,6 +73,13 @@ func defaultKeyMap() keyMap {
 		Purge: key.NewBinding(
 			key.WithKeys("D"),
 			key.WithHelp("D", "delete + close window"),
+		),
+		Kill: key.NewBinding(
+			// Capital K avoids the bubbles/list default "k = cursor up"
+			// vim binding, and mirrors the lowercase/uppercase split used
+			// by Delete/Purge for "destructive-ish" actions.
+			key.WithKeys("K"),
+			key.WithHelp("K", "kill window"),
 		),
 		SetLayout: key.NewBinding(
 			key.WithKeys("l"),

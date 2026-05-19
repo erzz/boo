@@ -94,6 +94,24 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	onSetLayout := func(name, template string) error {
 		return executeSetLayout(a, name, template)
 	}
+	// onKill closes the live Ghostty window for the project. It deliberately
+	// does NOT take the state lock: CloseWindow only reads the runtime file
+	// and shells out to JXA. Returning a non-nil error surfaces on the
+	// picker's error screen; success refreshes the list so the "running"
+	// pill flips back to "stopped".
+	onKill := func(name string) error {
+		rt, err := project.LoadRuntime(a.Paths, name)
+		if err != nil {
+			return fmt.Errorf("read runtime for %q: %w", name, err)
+		}
+		if rt.WindowID == "" {
+			return fmt.Errorf("no recorded Ghostty window for %q", name)
+		}
+		if err := a.Ghostty.CloseWindow(ctx, rt.WindowID); err != nil {
+			return fmt.Errorf("close window %s: %w", rt.WindowID, err)
+		}
+		return nil
+	}
 	onEdit := func(oldName, newName, newDir, newTemplate string) error {
 		return executeEdit(a, oldName, newName, newDir, newTemplate)
 	}
@@ -167,6 +185,7 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		ConfigPath:            a.Paths.ConfigFile,
 		OnDelete:              onDelete,
 		OnSetLayout:           onSetLayout,
+		OnKill:                onKill,
 		OnEdit:                onEdit,
 		OnOpenLayout:          onOpenLayout,
 		OnLaunch:              onLaunch,
