@@ -116,31 +116,7 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 		return executeEdit(a, oldName, newName, newDir, newTemplate)
 	}
 	onOpenLayout := func(name string) tea.Cmd {
-		// Editor resolution mirrors `boo edit`: $EDITOR wins, $VISUAL is the fallback.
-		// Verify the project and layout file exist before suspending the alt-screen.
-		freshReg, err := project.Load(a.Paths)
-		if err != nil {
-			return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
-		}
-		if _, err := freshReg.Get(name); err != nil {
-			return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
-		}
-		path := a.Paths.ProjectLayoutFile(name)
-		if _, err := os.Stat(path); err != nil {
-			return func() tea.Msg {
-				return picker.NewEditorFinishedMsg(
-					fmt.Errorf("layout file for project %q not found at %s: %w", name, path, err))
-			}
-		}
-		ed, err := buildEditorCmd("", path)
-		if err != nil {
-			return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
-		}
-		// tea.ExecProcess wires Stdin/Stdout/Stderr to the controlling terminal and restores
-		// the alt-screen on exit.
-		return tea.ExecProcess(ed, func(err error) tea.Msg {
-			return picker.NewEditorFinishedMsg(err)
-		})
+		return openProjectLayoutCmd(a, name)
 	}
 	refresh := func() ([]picker.Item, error) {
 		freshReg, err := project.Load(a.Paths)
@@ -216,6 +192,45 @@ func runPicker(ctx context.Context, a *app, mode pickerMode, out io.Writer) erro
 	default:
 		return fmt.Errorf("picker: unexpected handoff intent %T", v)
 	}
+}
+
+func openProjectLayoutCmd(a *app, name string) tea.Cmd {
+	// Editor resolution mirrors `boo edit`: $EDITOR wins, $VISUAL is the fallback.
+	// Verify the project and layout file exist before suspending the alt-screen.
+	freshReg, err := project.Load(a.Paths)
+	if err != nil {
+		return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
+	}
+	p, err := freshReg.Get(name)
+	if err != nil {
+		return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
+	}
+	responsive, err := projectUsesResponsiveLayout(a, p)
+	if err != nil {
+		return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
+	}
+	if responsive {
+		return func() tea.Msg {
+			return picker.NewEditorFinishedMsg(
+				fmt.Errorf("project %q uses a responsive layout; editing responsive layouts in the TUI is not supported yet", name))
+		}
+	}
+	path := a.Paths.ProjectLayoutFile(name)
+	if _, err := os.Stat(path); err != nil {
+		return func() tea.Msg {
+			return picker.NewEditorFinishedMsg(
+				fmt.Errorf("layout file for project %q not found at %s: %w", name, path, err))
+		}
+	}
+	ed, err := buildEditorCmd("", path)
+	if err != nil {
+		return func() tea.Msg { return picker.NewEditorFinishedMsg(err) }
+	}
+	// tea.ExecProcess wires Stdin/Stdout/Stderr to the controlling terminal and restores
+	// the alt-screen on exit.
+	return tea.ExecProcess(ed, func(err error) tea.Msg {
+		return picker.NewEditorFinishedMsg(err)
+	})
 }
 
 // buildPickerItems mirrors the status/last-launched columns from `boo list`
@@ -357,7 +372,11 @@ func templatePreviewer(a *app) func(string) string {
 		if err != nil {
 			return ""
 		}
-		return layoutpreview.RenderLayout(r.Layout, previewWidth)
+		l, err := r.Layout.Resolve(0)
+		if err != nil {
+			return ""
+		}
+		return layoutpreview.RenderLayout(l, previewWidth)
 	}
 }
 
@@ -389,6 +408,9 @@ func layoutResolver(a *app) func(template string) (*layout.Layout, error) {
 			return nil, err
 		}
 		l := r.Layout
+		if l.IsResponsive() {
+			return nil, fmt.Errorf("layout template %q is responsive; new-project layout editor does not support responsive layouts yet", template)
+		}
 		if l.Name == "" {
 			l.Name = template
 		}
@@ -457,10 +479,14 @@ func projectPreviewer(ctx context.Context, a *app, thm picker.Theme) func(string
 		// Fall back to template only when no saved file exists. Other errors render inline.
 		var rendered string
 		if saved, err := project.LoadLayout(a.Paths, p.Name); err == nil {
-			rendered = layoutpreview.RenderLayout(saved, rightPaneInnerWidth)
+			if resolved, err := saved.Resolve(0); err == nil {
+				rendered = layoutpreview.RenderLayout(resolved, rightPaneInnerWidth)
+			}
 		} else if errors.Is(err, os.ErrNotExist) {
 			if r, err := layout.ResolveTemplate(a.Paths.LayoutsDir, p.Layout); err == nil {
-				rendered = layoutpreview.RenderLayout(r.Layout, rightPaneInnerWidth)
+				if resolved, err := r.Layout.Resolve(0); err == nil {
+					rendered = layoutpreview.RenderLayout(resolved, rightPaneInnerWidth)
+				}
 			}
 		} else {
 			rendered = thm.StatusBroken.Render("✖ layout unreadable")

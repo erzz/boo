@@ -332,3 +332,136 @@ func TestInteriorPointers_DFSPreOrder(t *testing.T) {
 		t.Errorf("leaf-only tree should return nil/empty interior pointers, got %d", len(got))
 	}
 }
+
+func TestValidate_ResponsiveLayouts(t *testing.T) {
+	leaf := Split{Cwd: "."}
+	cases := []struct {
+		name string
+		l    Layout
+		want string
+	}{
+		{
+			name: "tabs and variants exclusive",
+			l: Layout{
+				Name:     "x",
+				Tabs:     []Tab{{Root: leaf}},
+				Variants: []Variant{{Tabs: []Tab{{Root: leaf}}}},
+			},
+			want: "mutually exclusive",
+		},
+		{
+			name: "responsive needs default",
+			l:    Layout{Name: "x", Variants: []Variant{{MinCols: 100, Tabs: []Tab{{Root: leaf}}}}},
+			want: "exactly one default variant",
+		},
+		{
+			name: "responsive rejects two defaults",
+			l:    Layout{Name: "x", Variants: []Variant{{Tabs: []Tab{{Root: leaf}}}, {Tabs: []Tab{{Root: leaf}}}}},
+			want: "exactly one default variant",
+		},
+		{
+			name: "variant max below min rejected",
+			l:    Layout{Name: "x", Variants: []Variant{{Tabs: []Tab{{Root: leaf}}}, {MinCols: 120, MaxCols: 100, Tabs: []Tab{{Root: leaf}}}}},
+			want: "must be >= min_cols",
+		},
+		{
+			name: "variant needs tabs",
+			l:    Layout{Name: "x", Variants: []Variant{{Tabs: []Tab{{Root: leaf}}}, {MinCols: 120}}},
+			want: "must declare at least one tab",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.l.Validate()
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("expected error containing %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+func TestParse_ResponsiveLayoutRoundTrip(t *testing.T) {
+	in := Layout{
+		Name: "responsive",
+		Variants: []Variant{
+			{Tabs: []Tab{{Name: "compact", Root: Split{Cwd: "."}}}},
+			{MinCols: 140, Tabs: []Tab{{Name: "wide", Root: Split{Direction: DirRow, Children: []Split{{Cwd: "."}, {Cwd: "logs"}}}}}},
+		},
+	}
+	data, err := Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	out, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v\n%s", err, data)
+	}
+	if !out.IsResponsive() {
+		t.Fatal("parsed layout lost responsive variants")
+	}
+	if len(out.Variants) != 2 {
+		t.Fatalf("variants = %d, want 2", len(out.Variants))
+	}
+	if out.Variants[1].MinCols != 140 {
+		t.Fatalf("min_cols = %d, want 140", out.Variants[1].MinCols)
+	}
+	if out.Variants[1].Tabs[0].Root.Direction != DirRow {
+		t.Fatalf("variant root direction = %q, want %q", out.Variants[1].Tabs[0].Root.Direction, DirRow)
+	}
+	if !strings.Contains(string(data), "variants:") || !strings.Contains(string(data), "min_cols:") {
+		t.Fatalf("marshalled YAML missing responsive keys:\n%s", data)
+	}
+}
+
+func TestLayoutResolve_ResponsiveSelection(t *testing.T) {
+	l := Layout{
+		Name: "responsive",
+		Variants: []Variant{
+			{Tabs: []Tab{{Name: "default", Root: Split{Cwd: "."}}}},
+			{MaxCols: 119, Tabs: []Tab{{Name: "compact", Root: Split{Cwd: "compact"}}}},
+			{MinCols: 120, MaxCols: 199, Tabs: []Tab{{Name: "laptop", Root: Split{Cwd: "laptop"}}}},
+			{MinCols: 200, Tabs: []Tab{{Name: "wide", Root: Split{Cwd: "wide"}}}},
+		},
+	}
+
+	cases := []struct {
+		cols int
+		want string
+	}{
+		{0, "default"},
+		{90, "compact"},
+		{119, "compact"},
+		{120, "laptop"},
+		{150, "laptop"},
+		{199, "laptop"},
+		{200, "wide"},
+		{220, "wide"},
+	}
+	for _, c := range cases {
+		resolved, err := l.Resolve(c.cols)
+		if err != nil {
+			t.Fatalf("Resolve(%d): %v", c.cols, err)
+		}
+		if got := resolved.Tabs[0].Name; got != c.want {
+			t.Fatalf("Resolve(%d) tab = %q, want %q", c.cols, got, c.want)
+		}
+	}
+}
+
+func TestLayoutResolve_PrefersFirstMatchingVariant(t *testing.T) {
+	l := Layout{
+		Name: "responsive",
+		Variants: []Variant{
+			{Tabs: []Tab{{Name: "default", Root: Split{Cwd: "."}}}},
+			{MinCols: 100, Tabs: []Tab{{Name: "first", Root: Split{Cwd: "first"}}}},
+			{MinCols: 100, Tabs: []Tab{{Name: "second", Root: Split{Cwd: "second"}}}},
+		},
+	}
+	resolved, err := l.Resolve(150)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got := resolved.Tabs[0].Name; got != "first" {
+		t.Fatalf("Resolve picked %q, want first matching variant", got)
+	}
+}

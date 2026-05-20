@@ -10,11 +10,14 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/erzz/boo/internal/ghostty"
 	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/project"
 )
+
+var terminalColsFn = terminalCols
 
 // runRoot dispatches bare 'boo' / 'boo <name>'. With a name argument switches to
 // that project; with no args always opens the TUI picker (no cwd-detect-and-switch,
@@ -102,7 +105,11 @@ func openProjectWindow(ctx context.Context, a *app, p project.Project) (*ghostty
 	if err != nil {
 		return nil, err
 	}
-	return a.Ghostty.OpenLayout(ctx, layoutToParams(p.Dir, l))
+	resolved, err := resolveLaunchLayout(l)
+	if err != nil {
+		return nil, err
+	}
+	return a.Ghostty.OpenLayout(ctx, layoutToParams(p.Dir, resolved))
 }
 
 // loadOrRegenerateLayout reads the per-project layout snapshot, regenerating it from the
@@ -137,6 +144,27 @@ func loadOrRegenerateLayout(a *app, p project.Project) (layout.Layout, error) {
 	slog.Info("regenerated missing layout snapshot",
 		"project", p.Name, "template", tplName, "path", a.Paths.ProjectLayoutFile(p.Name))
 	return regenerated, nil
+}
+
+func resolveLaunchLayout(l layout.Layout) (layout.Layout, error) {
+	if !l.IsResponsive() {
+		return l, nil
+	}
+	cols := terminalColsFn()
+	return l.Resolve(cols)
+}
+
+func terminalCols() int {
+	for _, fd := range []int{int(os.Stdout.Fd()), int(os.Stderr.Fd()), int(os.Stdin.Fd())} {
+		if !term.IsTerminal(fd) {
+			continue
+		}
+		cols, _, err := term.GetSize(fd)
+		if err == nil && cols > 0 {
+			return cols
+		}
+	}
+	return 0
 }
 
 // layoutToParams projects a layout.Layout into the JSON shape OpenLayout

@@ -69,7 +69,7 @@ func executeSetLayout(a *app, name, template string) error {
 		if err := project.SaveLayout(a.Paths, name, l); err != nil {
 			return err
 		}
-		p.Layout = l.Name
+		p.Layout = template
 		if err := reg.Update(p); err != nil {
 			return err
 		}

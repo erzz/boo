@@ -126,3 +126,37 @@ func TestRunLayouts_BadUserTemplateIsReportedInline(t *testing.T) {
 		t.Errorf("broken template suppressed healthy listings:\n%s", got)
 	}
 }
+
+func TestRunLayouts_ResponsiveTemplateUsesDefaultVariantForPreview(t *testing.T) {
+	a := makeAppForLayouts(t)
+	responsive := []byte(`# Responsive template.
+name: responsive
+variants:
+  - min_cols: 120
+    tabs:
+      - name: wide
+        split:
+          direction: row
+          children:
+            - cwd: "."
+            - cwd: logs
+  - tabs:
+      - name: compact
+        split:
+          cwd: "."
+`)
+	if err := os.WriteFile(filepath.Join(a.Paths.LayoutsDir, "responsive.yaml"), responsive, 0o644); err != nil {
+		t.Fatalf("write responsive template: %v", err)
+	}
+	var out bytes.Buffer
+	if err := runLayouts(a, &out); err != nil {
+		t.Fatalf("runLayouts: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `Tab 0 "compact"`) {
+		t.Fatalf("output missing default responsive preview:\n%s", got)
+	}
+	if strings.Contains(got, "preview unavailable") {
+		t.Fatalf("responsive preview unexpectedly unavailable:\n%s", got)
+	}
+}

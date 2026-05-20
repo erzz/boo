@@ -151,7 +151,11 @@ func writeLayoutEntry(w io.Writer, r layout.ResolvedTemplate) {
 	_, _ = fmt.Fprintln(w)
 
 	// Indent preview 2 spaces to group visually with the metadata above.
-	preview := layoutpreview.RenderLayout(r.Layout, previewWidth)
+	resolved, err := r.Layout.Resolve(0)
+	preview := "(preview unavailable)"
+	if err == nil {
+		preview = layoutpreview.RenderLayout(resolved, previewWidth)
+	}
 	for _, line := range strings.Split(preview, "\n") {
 		_, _ = fmt.Fprintf(w, "  %s\n", line)
 	}

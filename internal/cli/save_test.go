@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	booexec "github.com/erzz/boo/internal/exec"
 	"github.com/erzz/boo/internal/ghostty"
 	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/project"
@@ -143,5 +147,181 @@ func TestRelativiseCwd(t *testing.T) {
 		if got := relativiseCwd(c.project, c.cwd); got != c.want {
 			t.Errorf("relativiseCwd(%q,%q) = %q, want %q", c.project, c.cwd, got, c.want)
 		}
+	}
+}
+
+func TestSave_RejectsResponsiveLayouts(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(a.Paths.ProjectDir("proj"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	responsive := layout.Layout{
+		Name: "responsive",
+		Variants: []layout.Variant{
+			{Tabs: []layout.Tab{{Root: layout.Split{Cwd: "."}}}},
+			{MinCols: 120, Tabs: []layout.Tab{{Root: layout.Split{Direction: layout.DirRow, Children: []layout.Split{{Cwd: "."}, {Cwd: "logs"}}}}}},
+		},
+	}
+	if err := project.SaveLayout(a.Paths, "proj", responsive); err != nil {
+		t.Fatalf("SaveLayout: %v", err)
+	}
+	reg, err := project.Load(a.Paths)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := reg.Add(project.Project{Name: "proj", Dir: dir, Layout: "responsive"}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := reg.Save(a.Paths); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+	if err := project.SaveRuntime(a.Paths, "proj", project.Runtime{WindowID: "win-1"}); err != nil {
+		t.Fatalf("SaveRuntime: %v", err)
+	}
+
+	fake := booexec.NewFake(func(_ string, _ []string, stdin []byte) ([]byte, []byte, error) {
+		if strings.Contains(string(stdin), `"windowId":"win-1"`) {
+			return []byte(`{"exists":true}`), nil, nil
+		}
+		return nil, nil, nil
+	})
+	a.Ghostty = ghostty.New(fake)
+
+	cmd := newSaveCmdWithApp(a)
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"proj"})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("expected responsive save error, got nil")
+	}
+	if !strings.Contains(err.Error(), "responsive layout") {
+		t.Fatalf("error = %v, want responsive-layout message", err)
+	}
+}
+
+func TestSave_RejectsResponsiveLayoutsWhenSnapshotMissing(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	responsive := []byte("name: responsive\nvariants:\n  - tabs:\n      - split:\n          cwd: .\n  - min_cols: 120\n    tabs:\n      - split:\n          direction: row\n          children:\n            - cwd: .\n            - cwd: logs\n")
+	if err := os.WriteFile(filepath.Join(a.Paths.LayoutsDir, "responsive.yaml"), responsive, 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	registerProjectForTest(t, a, "proj", dir, "responsive")
+	if err := os.Remove(a.Paths.ProjectLayoutFile("proj")); err != nil {
+		t.Fatalf("remove snapshot: %v", err)
+	}
+	if err := project.SaveRuntime(a.Paths, "proj", project.Runtime{WindowID: "win-1"}); err != nil {
+		t.Fatalf("SaveRuntime: %v", err)
+	}
+	a.Ghostty = ghostty.New(booexec.NewFake(func(_ string, _ []string, stdin []byte) ([]byte, []byte, error) {
+		if strings.Contains(string(stdin), `"windowId":"win-1"`) {
+			return []byte(`{"exists":true}`), nil, nil
+		}
+		return nil, nil, nil
+	}))
+	cmd := newSaveCmdWithApp(a)
+	cmd.SetArgs([]string{"proj"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "responsive layout") {
+		t.Fatalf("err = %v, want responsive-layout rejection", err)
+	}
+}
+
+func TestSave_RejectsResponsiveLayoutsWhenSnapshotUnreadable(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	responsive := []byte("name: responsive\nvariants:\n  - tabs:\n      - split:\n          cwd: .\n  - min_cols: 120\n    tabs:\n      - split:\n          direction: row\n          children:\n            - cwd: .\n            - cwd: logs\n")
+	if err := os.WriteFile(filepath.Join(a.Paths.LayoutsDir, "responsive.yaml"), responsive, 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	registerProjectForTest(t, a, "proj", dir, "responsive")
+	if err := os.WriteFile(a.Paths.ProjectLayoutFile("proj"), []byte("name: broken\nvariants: ["), 0o644); err != nil {
+		t.Fatalf("write broken snapshot: %v", err)
+	}
+	if err := project.SaveRuntime(a.Paths, "proj", project.Runtime{WindowID: "win-1"}); err != nil {
+		t.Fatalf("SaveRuntime: %v", err)
+	}
+	a.Ghostty = ghostty.New(booexec.NewFake(func(_ string, _ []string, stdin []byte) ([]byte, []byte, error) {
+		if strings.Contains(string(stdin), `"windowId":"win-1"`) {
+			return []byte(`{"exists":true}`), nil, nil
+		}
+		return nil, nil, nil
+	}))
+	cmd := newSaveCmdWithApp(a)
+	cmd.SetArgs([]string{"proj"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "responsive layout") {
+		t.Fatalf("err = %v, want responsive-layout rejection", err)
+	}
+}
+
+func TestSave_RejectsResponsiveLayoutsBeforeWindowChecks(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	responsive := layout.Layout{
+		Name: "responsive",
+		Variants: []layout.Variant{
+			{Tabs: []layout.Tab{{Root: layout.Split{Cwd: "."}}}},
+			{MinCols: 120, Tabs: []layout.Tab{{Root: layout.Split{Direction: layout.DirRow, Children: []layout.Split{{Cwd: "."}, {Cwd: "logs"}}}}}},
+		},
+	}
+	if err := project.SaveLayout(a.Paths, "proj", responsive); err != nil {
+		t.Fatalf("SaveLayout: %v", err)
+	}
+	reg, err := project.Load(a.Paths)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := reg.Add(project.Project{Name: "proj", Dir: dir, Layout: "responsive"}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := reg.Save(a.Paths); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	cmd := newSaveCmdWithApp(a)
+	cmd.SetArgs([]string{"proj"})
+	err = cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "responsive layout") {
+		t.Fatalf("err = %v, want responsive-layout rejection before window checks", err)
+	}
+}
+
+func TestMatchFrontWindow_DoesNotPersistRecoveredWindowID(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	registerProjectForTest(t, a, "proj", dir, "triple")
+	if err := project.SaveRuntime(a.Paths, "proj", project.Runtime{}); err != nil {
+		t.Fatalf("SaveRuntime: %v", err)
+	}
+	a.Ghostty = ghostty.New(booexec.NewFake(func(_ string, _ []string, stdin []byte) ([]byte, []byte, error) {
+		switch {
+		case stdin == nil:
+			return []byte(`{"windowId":"win-1"}`), nil, nil
+		default:
+			return []byte(`{"tabs":[{"terminals":[{"workingDirectory":"` + dir + `"}]}]}`), nil, nil
+		}
+	}))
+	reg, err := project.Load(a.Paths)
+	if err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+
+	match, err := matchFrontWindow(nil, a, reg)
+	if err != nil {
+		t.Fatalf("matchFrontWindow: %v", err)
+	}
+	if match.recoveredWindowID != "win-1" {
+		t.Fatalf("recoveredWindowID = %q, want win-1", match.recoveredWindowID)
+	}
+	rt, err := project.LoadRuntime(a.Paths, "proj")
+	if err != nil {
+		t.Fatalf("LoadRuntime: %v", err)
+	}
+	if rt.WindowID != "" {
+		t.Fatalf("runtime WindowID = %q, want unchanged empty string", rt.WindowID)
 	}
 }

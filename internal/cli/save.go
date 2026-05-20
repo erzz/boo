@@ -103,6 +103,12 @@ still printed to stderr under --force so audit logs show what was lost.`,
 				switch {
 				case match.project != nil:
 					p = *match.project
+					if match.recoveredWindowID != "" {
+						if rt, err := project.LoadRuntime(a.Paths, p.Name); err == nil {
+							rt.WindowID = match.recoveredWindowID
+							_ = project.SaveRuntime(a.Paths, p.Name, rt)
+						}
+					}
 					_, _ = fmt.Fprintf(c.OutOrStdout(), "Detected project %q from focused Ghostty window.\n", p.Name)
 				case match.unregisteredCwd != "":
 					// Front Ghostty window exists but no registered project owns
@@ -136,6 +142,14 @@ still printed to stderr under --force so audit logs show what was lost.`,
 					}
 					return runCreateProject(c.Context(), a, npi, c.OutOrStdout())
 				}
+			}
+
+			responsive, err := projectUsesResponsiveLayout(a, p)
+			if err != nil {
+				return err
+			}
+			if responsive {
+				return fmt.Errorf("project %q uses a responsive layout; 'boo save' does not support responsive layouts yet", p.Name)
 			}
 
 			rt, err := project.LoadRuntime(a.Paths, p.Name)
@@ -226,6 +240,29 @@ still printed to stderr under --force so audit logs show what was lost.`,
 	return cmd
 }
 
+func projectUsesResponsiveLayout(a *app, p project.Project) (bool, error) {
+	saved, err := project.LoadLayout(a.Paths, p.Name)
+	switch {
+	case err == nil:
+		return saved.IsResponsive(), nil
+	case errors.Is(err, fs.ErrNotExist), isLayoutParseError(err):
+		return resolveResponsiveFromTemplate(a, p, err)
+	default:
+		return false, fmt.Errorf("read previous layout: %w", err)
+	}
+}
+
+func resolveResponsiveFromTemplate(a *app, p project.Project, snapshotErr error) (bool, error) {
+	if p.Layout == "" {
+		return false, nil
+	}
+	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, p.Layout)
+	if err != nil {
+		return false, fmt.Errorf("read previous layout: %w", snapshotErr)
+	}
+	return resolved.Layout.IsResponsive(), nil
+}
+
 // applySaveOutcome renders the diff and optionally prompts for confirmation.
 // Returns (true, nil) to proceed, (false, nil) if the user declined.
 // Extracted for testability — the decision matrix is the part most worth pinning down.
@@ -255,8 +292,9 @@ func applySaveOutcome(diff SaveDiff, force bool, in io.Reader, out, errOut io.Wr
 // Exactly one of project / unregisteredCwd is populated on nil error when a window is focused.
 // When no window is focused, returns a clean error (nothing actionable for `boo save`).
 type frontWindowMatch struct {
-	project         *project.Project
-	unregisteredCwd string
+	project           *project.Project
+	recoveredWindowID string
+	unregisteredCwd   string
 }
 
 func matchFrontWindow(ctx context.Context, a *app, reg *project.Registry) (frontWindowMatch, error) {
@@ -287,13 +325,8 @@ func matchFrontWindow(ctx context.Context, a *app, reg *project.Registry) (front
 		cwd = firstTerminalCwd(desc)
 		if cwd != "" {
 			if p, err := reg.FindByDir(cwd); err == nil {
-				// Refresh the stale WindowID so the rest of `save` can capture the window.
-				if rt, rerr := project.LoadRuntime(a.Paths, p.Name); rerr == nil {
-					rt.WindowID = id
-					_ = project.SaveRuntime(a.Paths, p.Name, rt)
-				}
 				pp := p
-				return frontWindowMatch{project: &pp}, nil
+				return frontWindowMatch{project: &pp, recoveredWindowID: id}, nil
 			}
 		}
 	}
