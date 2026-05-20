@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,8 +299,8 @@ func TestMatchFrontWindow_DoesNotPersistRecoveredWindowID(t *testing.T) {
 		t.Fatalf("SaveRuntime: %v", err)
 	}
 	a.Ghostty = ghostty.New(booexec.NewFake(func(_ string, _ []string, stdin []byte) ([]byte, []byte, error) {
-		switch {
-		case stdin == nil:
+		switch stdin {
+		case nil:
 			return []byte(`{"windowId":"win-1"}`), nil, nil
 		default:
 			return []byte(`{"tabs":[{"terminals":[{"workingDirectory":"` + dir + `"}]}]}`), nil, nil
@@ -310,7 +311,7 @@ func TestMatchFrontWindow_DoesNotPersistRecoveredWindowID(t *testing.T) {
 		t.Fatalf("Load registry: %v", err)
 	}
 
-	match, err := matchFrontWindow(nil, a, reg)
+	match, err := matchFrontWindow(context.TODO(), a, reg)
 	if err != nil {
 		t.Fatalf("matchFrontWindow: %v", err)
 	}
