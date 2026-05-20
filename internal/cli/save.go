@@ -258,7 +258,7 @@ func resolveResponsiveFromTemplate(a *app, p project.Project, snapshotErr error)
 	}
 	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, p.Layout)
 	if err != nil {
-		return false, fmt.Errorf("read previous layout: %w", snapshotErr)
+		return false, fmt.Errorf("resolve layout template %q after previous layout read failed (%v): %w", p.Layout, snapshotErr, err)
 	}
 	return resolved.Layout.IsResponsive(), nil
 }
