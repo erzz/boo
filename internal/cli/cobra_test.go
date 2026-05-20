@@ -18,6 +18,7 @@ import (
 	booexec "github.com/erzz/boo/internal/exec"
 	"github.com/erzz/boo/internal/ghostty"
 	"github.com/erzz/boo/internal/git"
+	"github.com/erzz/boo/internal/layout"
 	"github.com/erzz/boo/internal/project"
 	"github.com/erzz/boo/internal/state"
 )
@@ -307,6 +308,120 @@ func TestCobra_Save_KnownProjectNoLiveWindow_Errors(t *testing.T) {
 }
 
 // ─── boo doctor ──────────────────────────────────────────────────────────────
+
+func TestCobra_Edit_RejectsResponsiveLayouts(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("BOO_HOME", root)
+	t.Setenv("EDITOR", "true")
+	t.Setenv("VISUAL", "")
+
+	p := state.ForRoot(root)
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+	responsive := layout.Layout{
+		Name: "responsive",
+		Variants: []layout.Variant{
+			{Tabs: []layout.Tab{{Root: layout.Split{Cwd: "."}}}},
+			{MinCols: 120, Tabs: []layout.Tab{{Root: layout.Split{Direction: layout.DirRow, Children: []layout.Split{{Cwd: "."}, {Cwd: "logs"}}}}}},
+		},
+	}
+	if err := project.SaveLayout(p, "proj", responsive); err != nil {
+		t.Fatalf("SaveLayout: %v", err)
+	}
+	reg, err := project.Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := reg.Add(project.Project{Name: "proj", Dir: t.TempDir(), Layout: "responsive"}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := reg.Save(p); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	cmd := newEditCmd()
+	_, _, err = executeCobraCmd(t, cmd, "proj")
+	if err == nil || !strings.Contains(err.Error(), "responsive layout") {
+		t.Fatalf("err = %v, want responsive-layout rejection", err)
+	}
+}
+
+func TestCobra_Edit_RejectsResponsiveLayoutsWhenSnapshotMissing(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("BOO_HOME", root)
+	t.Setenv("EDITOR", "true")
+	t.Setenv("VISUAL", "")
+
+	p := state.ForRoot(root)
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+	responsiveYAML := []byte("name: responsive\nvariants:\n  - tabs:\n      - split:\n          cwd: .\n  - min_cols: 120\n    tabs:\n      - split:\n          direction: row\n          children:\n            - cwd: .\n            - cwd: logs\n")
+	if err := os.WriteFile(filepath.Join(p.LayoutsDir, "responsive.yaml"), responsiveYAML, 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	if err := project.SaveLayout(p, "proj", layout.Default()); err != nil {
+		t.Fatalf("SaveLayout: %v", err)
+	}
+	if err := os.Remove(p.ProjectLayoutFile("proj")); err != nil {
+		t.Fatalf("remove snapshot: %v", err)
+	}
+	reg, err := project.Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := reg.Add(project.Project{Name: "proj", Dir: t.TempDir(), Layout: "responsive"}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := reg.Save(p); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	cmd := newEditCmd()
+	_, _, err = executeCobraCmd(t, cmd, "proj")
+	if err == nil || !strings.Contains(err.Error(), "responsive layout") {
+		t.Fatalf("err = %v, want responsive-layout rejection", err)
+	}
+}
+
+func TestCobra_Edit_RejectsResponsiveLayoutsWhenSnapshotUnreadable(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("BOO_HOME", root)
+	t.Setenv("EDITOR", "true")
+	t.Setenv("VISUAL", "")
+
+	p := state.ForRoot(root)
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+	responsiveYAML := []byte("name: responsive\nvariants:\n  - tabs:\n      - split:\n          cwd: .\n  - min_cols: 120\n    tabs:\n      - split:\n          direction: row\n          children:\n            - cwd: .\n            - cwd: logs\n")
+	if err := os.WriteFile(filepath.Join(p.LayoutsDir, "responsive.yaml"), responsiveYAML, 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	if err := project.SaveLayout(p, "proj", layout.Default()); err != nil {
+		t.Fatalf("SaveLayout: %v", err)
+	}
+	if err := os.WriteFile(p.ProjectLayoutFile("proj"), []byte("name: broken\nvariants: ["), 0o644); err != nil {
+		t.Fatalf("write broken snapshot: %v", err)
+	}
+	reg, err := project.Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := reg.Add(project.Project{Name: "proj", Dir: t.TempDir(), Layout: "responsive"}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := reg.Save(p); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	cmd := newEditCmd()
+	_, _, err = executeCobraCmd(t, cmd, "proj")
+	if err == nil || !strings.Contains(err.Error(), "responsive layout") {
+		t.Fatalf("err = %v, want responsive-layout rejection", err)
+	}
+}
 
 // TestCobra_Doctor_Smoke verifies the doctor command runs its full cobra path without panicking.
 // Ghostty checks that use exec.LookPath (not Runner) may return FAIL in test envs — that's expected.

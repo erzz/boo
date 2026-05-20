@@ -202,6 +202,92 @@ func TestLoadOrRegenerateLayout_CorruptSnapshotIsHardError(t *testing.T) {
 	}
 }
 
+func TestResolveLaunchLayout_ResponsiveUsesTerminalCols(t *testing.T) {
+	t.Cleanup(func() { terminalColsFn = terminalCols })
+	terminalColsFn = func() int { return 150 }
+
+	l := layout.Layout{
+		Name: "responsive",
+		Variants: []layout.Variant{
+			{Tabs: []layout.Tab{{Name: "default", Root: layout.Split{Cwd: "."}}}},
+			{MinCols: 120, Tabs: []layout.Tab{{Name: "wide", Root: layout.Split{Cwd: "wide"}}}},
+		},
+	}
+
+	resolved, err := resolveLaunchLayout(l)
+	if err != nil {
+		t.Fatalf("resolveLaunchLayout: %v", err)
+	}
+	if got := resolved.Tabs[0].Name; got != "wide" {
+		t.Fatalf("resolved tab = %q, want wide", got)
+	}
+}
+
+func TestResolveLaunchLayout_ResponsiveFallsBackWhenColsUnknown(t *testing.T) {
+	t.Cleanup(func() { terminalColsFn = terminalCols })
+	terminalColsFn = func() int { return 0 }
+
+	l := layout.Layout{
+		Name: "responsive",
+		Variants: []layout.Variant{
+			{Tabs: []layout.Tab{{Name: "default", Root: layout.Split{Cwd: "."}}}},
+			{MinCols: 120, Tabs: []layout.Tab{{Name: "wide", Root: layout.Split{Cwd: "wide"}}}},
+		},
+	}
+
+	resolved, err := resolveLaunchLayout(l)
+	if err != nil {
+		t.Fatalf("resolveLaunchLayout: %v", err)
+	}
+	if got := resolved.Tabs[0].Name; got != "default" {
+		t.Fatalf("resolved tab = %q, want default", got)
+	}
+}
+
+func TestLoadOrRegenerateLayout_ResponsiveTemplateThenResolveByCols(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	responsive := []byte("name: responsive\nvariants:\n  - tabs:\n      - name: compact\n        split:\n          cwd: .\n  - min_cols: 120\n    tabs:\n      - name: wide\n        split:\n          direction: row\n          children:\n            - cwd: .\n            - cwd: logs\n")
+	if err := os.WriteFile(filepath.Join(a.Paths.LayoutsDir, "responsive.yaml"), responsive, 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	registerProjectForTest(t, a, "proj", dir, "responsive")
+	if err := os.Remove(a.Paths.ProjectLayoutFile("proj")); err != nil {
+		t.Fatalf("remove snapshot: %v", err)
+	}
+	reg, err := project.Load(a.Paths)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p, err := reg.Get("proj")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	t.Cleanup(func() { terminalColsFn = terminalCols })
+	terminalColsFn = func() int { return 150 }
+	l, err := loadOrRegenerateLayout(a, p)
+	if err != nil {
+		t.Fatalf("loadOrRegenerateLayout: %v", err)
+	}
+	resolved, err := resolveLaunchLayout(l)
+	if err != nil {
+		t.Fatalf("resolveLaunchLayout: %v", err)
+	}
+	if got := resolved.Tabs[0].Name; got != "wide" {
+		t.Fatalf("resolved tab = %q, want wide", got)
+	}
+
+	terminalColsFn = func() int { return 0 }
+	resolved, err = resolveLaunchLayout(l)
+	if err != nil {
+		t.Fatalf("resolveLaunchLayout fallback: %v", err)
+	}
+	if got := resolved.Tabs[0].Name; got != "compact" {
+		t.Fatalf("resolved fallback tab = %q, want compact", got)
+	}
+}
+
 // TestShow_LayoutFilePathExistsForRegisteredProject: layout file path exists for a registered project.
 func TestShow_LayoutFilePathExistsForRegisteredProject(t *testing.T) {
 	a := makeAppForCmds(t)

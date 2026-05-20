@@ -235,6 +235,37 @@ func TestExecuteEdit_AbsolutizesRelativeDir(t *testing.T) {
 	}
 }
 
+func TestExecuteEdit_ResponsiveTemplateKeepsTemplateKey(t *testing.T) {
+	a := makeAppForCmds(t)
+	dir := t.TempDir()
+	registerProjectForTest(t, a, "proj", dir, "1x1x1")
+
+	responsive := []byte("name: responsive\nvariants:\n  - tabs:\n      - split:\n          cwd: .\n  - min_cols: 120\n    tabs:\n      - split:\n          direction: row\n          children:\n            - cwd: .\n            - cwd: logs\n")
+	if err := os.WriteFile(filepath.Join(a.Paths.LayoutsDir, "responsive.yaml"), responsive, 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	if err := executeEdit(a, "proj", "proj", dir, "responsive"); err != nil {
+		t.Fatalf("executeEdit: %v", err)
+	}
+
+	reg, _ := project.Load(a.Paths)
+	p, _ := reg.Get("proj")
+	if p.Layout != "responsive" {
+		t.Fatalf("registry layout = %q, want responsive", p.Layout)
+	}
+	saved, err := project.LoadLayout(a.Paths, "proj")
+	if err != nil {
+		t.Fatalf("LoadLayout: %v", err)
+	}
+	if !saved.IsResponsive() {
+		t.Fatal("saved layout lost responsive variants")
+	}
+	if _, err := saved.Resolve(150); err != nil {
+		t.Fatalf("Resolve responsive layout: %v", err)
+	}
+}
+
 // contains aliases strings.Contains so the assertions read naturally.
 func contains(haystack, needle string) bool {
 	return strings.Contains(haystack, needle)

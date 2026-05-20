@@ -24,8 +24,18 @@ const MaxDepth = 8
 
 // Layout is a complete project layout.
 type Layout struct {
-	Name string `json:"name"`
-	Tabs []Tab  `json:"tabs"`
+	Name     string    `json:"name"`
+	Tabs     []Tab     `json:"tabs,omitempty"`
+	Variants []Variant `json:"variants,omitempty"`
+}
+
+// Variant is one responsive layout branch selected by terminal width.
+// Exactly one variant in a responsive layout must be the default variant
+// (no min_cols/max_cols) so callers have a fallback when width is unavailable.
+type Variant struct {
+	MinCols int   `json:"min_cols,omitempty"`
+	MaxCols int   `json:"max_cols,omitempty"`
+	Tabs    []Tab `json:"tabs"`
 }
 
 // Tab is a single Ghostty tab. Its Root is the (recursive) split tree for
@@ -92,6 +102,58 @@ func Default() Layout {
 	}
 }
 
+// IsResponsive reports whether l uses width-based variants instead of a single tab set.
+func (l Layout) IsResponsive() bool {
+	return len(l.Variants) > 0
+}
+
+// IsDefault reports whether v is the fallback responsive variant.
+func (v Variant) IsDefault() bool {
+	return v.MinCols == 0 && v.MaxCols == 0
+}
+
+// MatchesCols reports whether v applies to cols. cols must be > 0.
+func (v Variant) MatchesCols(cols int) bool {
+	if cols <= 0 {
+		return false
+	}
+	if v.MinCols > 0 && cols < v.MinCols {
+		return false
+	}
+	if v.MaxCols > 0 && cols > v.MaxCols {
+		return false
+	}
+	return true
+}
+
+// Resolve returns a concrete, non-responsive layout for cols.
+//
+// Responsive selection rules:
+//   - explicit variants are checked in file order; first match wins
+//   - when cols <= 0 or nothing matches, the default variant is used
+func (l Layout) Resolve(cols int) (Layout, error) {
+	if !l.IsResponsive() {
+		return l, nil
+	}
+
+	defaultIdx := -1
+	for i, v := range l.Variants {
+		if v.IsDefault() {
+			if defaultIdx < 0 {
+				defaultIdx = i
+			}
+			continue
+		}
+		if cols > 0 && v.MatchesCols(cols) {
+			return Layout{Name: l.Name, Tabs: v.Tabs}, nil
+		}
+	}
+	if defaultIdx >= 0 {
+		return Layout{Name: l.Name, Tabs: l.Variants[defaultIdx].Tabs}, nil
+	}
+	return Layout{}, fmt.Errorf("layout: responsive layout %q has no default variant", l.Name)
+}
+
 // Parse decodes a YAML document into a Layout, then validates it.
 func Parse(data []byte) (Layout, error) {
 	var l Layout
@@ -118,11 +180,55 @@ func (l Layout) Validate() error {
 	if strings.TrimSpace(l.Name) == "" {
 		return errors.New("layout: name is required")
 	}
-	if len(l.Tabs) == 0 {
-		return errors.New("layout: at least one tab is required")
+	hasTabs := len(l.Tabs) > 0
+	hasVariants := len(l.Variants) > 0
+	if hasTabs && hasVariants {
+		return errors.New("layout: tabs and variants are mutually exclusive")
 	}
-	for i, t := range l.Tabs {
-		if err := validateSplit(t.Root, fmt.Sprintf("tab %d (%q)", i, t.Name), 0); err != nil {
+	if !hasTabs && !hasVariants {
+		return errors.New("layout: at least one tab or responsive variant is required")
+	}
+	if hasTabs {
+		if err := validateTabs(l.Tabs, "tab"); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	defaultCount := 0
+	for i, v := range l.Variants {
+		path := fmt.Sprintf("variant %d", i)
+		if v.MinCols < 0 {
+			return fmt.Errorf("layout: %s: min_cols must be >= 0, got %d", path, v.MinCols)
+		}
+		if v.MaxCols < 0 {
+			return fmt.Errorf("layout: %s: max_cols must be >= 0, got %d", path, v.MaxCols)
+		}
+		if v.MaxCols > 0 && v.MinCols > 0 && v.MaxCols < v.MinCols {
+			return fmt.Errorf("layout: %s: max_cols (%d) must be >= min_cols (%d)", path, v.MaxCols, v.MinCols)
+		}
+		if v.IsDefault() {
+			defaultCount++
+		}
+		if err := validateTabs(v.Tabs, path+" tab"); err != nil {
+			return err
+		}
+	}
+	if defaultCount != 1 {
+		return errors.New("layout: responsive layouts must declare exactly one default variant (no min_cols/max_cols)")
+	}
+	return nil
+}
+
+func validateTabs(tabs []Tab, prefix string) error {
+	if len(tabs) == 0 {
+		if prefix == "tab" {
+			return errors.New("layout: at least one tab is required")
+		}
+		return fmt.Errorf("layout: %ss must declare at least one tab", prefix)
+	}
+	for i, t := range tabs {
+		if err := validateSplit(t.Root, fmt.Sprintf("%s %d (%q)", prefix, i, t.Name), 0); err != nil {
 			return err
 		}
 	}

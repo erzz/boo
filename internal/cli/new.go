@@ -270,6 +270,15 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 	// `name:` and may differ from its lookup key. We therefore derive
 	// `templateKey` from the user's submitted intent, independently of
 	// `l.Name`.
+	if intent.MaterialisedLayout == nil && strings.TrimSpace(intent.Template) != "" {
+		responsive, err := templateUsesResponsiveLayout(a, intent.Template)
+		if err != nil {
+			return err
+		}
+		if responsive {
+			_, _ = fmt.Fprintf(out, "Note: responsive template %q will be used as-is; layout editor is skipped for responsive layouts.\n", intent.Template)
+		}
+	}
 	var l layout.Layout
 	if intent.MaterialisedLayout != nil {
 		l = *intent.MaterialisedLayout
@@ -370,6 +379,14 @@ func runCreateProject(ctx context.Context, a *app, intent picker.NewProjectInten
 		}
 		return switchToProject(ctx, a, p)
 	})
+}
+
+func templateUsesResponsiveLayout(a *app, template string) (bool, error) {
+	resolved, err := layout.ResolveTemplate(a.Paths.LayoutsDir, template)
+	if err != nil {
+		return false, err
+	}
+	return resolved.Layout.IsResponsive(), nil
 }
 
 // preCheckCollisions surfaces name/dir collisions before a potentially slow clone.

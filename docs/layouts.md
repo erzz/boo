@@ -13,7 +13,8 @@ your own into `~/.config/boo/layouts/` to use across projects.
 
 ## Vocabulary
 
-A layout is a list of tabs. Each tab has a `root` split. A split is
+A layout is a list of tabs. Each tab has a root split, written as the
+`split:` field in YAML. A split is
 either a **leaf** (a single shell pane) or an **interior** node (a
 horizontal or vertical division of two child splits).
 
@@ -22,7 +23,7 @@ name: my-layout
 tabs:
   - name: edit                # Optional. Round-tripped but ignored on open
                               # — see "Tab names" below.
-    root:
+    split:
       cwd: .                  # Leaf: a single shell pane.
                               # "." resolves to the project root.
                               # Relative paths resolve under the project dir;
@@ -39,7 +40,7 @@ tabs:
         EDITOR: nvim
 
   - name: run
-    root:
+    split:
       direction: row          # Interior: split horizontally (left | right).
                               # "column" splits vertically (top | bottom).
       size: 0.4               # Optional. First child's fractional share of
@@ -70,6 +71,57 @@ tabs:
 - Optional `size` on an interior node is a float strictly between 0 and
   1 — the first child's fractional share. Omit (or set to 0) for an
   even split. Never appears on a leaf.
+
+### Responsive variants
+
+Layouts can also switch shape based on terminal width using `variants:`.
+Selection is based on terminal columns only.
+
+```yaml
+name: responsive-dev
+variants:
+  - tabs:                  # Default variant. Required fallback.
+      - name: compact
+        split:
+          direction: column
+          children:
+            - cwd: .
+            - cwd: .
+              command: npm run dev
+
+  - min_cols: 140
+    tabs:
+      - name: wide
+        split:
+          direction: row
+          children:
+            - cwd: .
+            - direction: column
+              children:
+                - cwd: .
+                  command: npm run dev
+                - cwd: .
+                  command: npm test -- --watch
+```
+
+Rules:
+
+- A layout uses either `tabs:` or `variants:`. Never both.
+- A responsive layout must declare exactly one default variant: the one
+  with no `min_cols` or `max_cols`.
+- `min_cols` and `max_cols` are inclusive when set.
+- Variants are checked in file order. First matching non-default variant
+  wins. If boo cannot determine terminal width, it falls back to the
+  default variant.
+
+Current limits:
+
+- `boo <project>` uses responsive selection when opening project windows.
+- `boo layouts` and picker previews render the default variant.
+- `boo save` rejects responsive layouts instead of flattening one variant
+  back into the file.
+- Opening a project's `layout.yaml` in the picker/editor and the new-project
+  layout editor do not support responsive layouts yet.
 
 ### Tab names
 

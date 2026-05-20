@@ -115,7 +115,7 @@ func executeEdit(a *app, oldName, newName, newDir, newTemplate string) error {
 		updated.Name = newName
 		updated.Dir = absDir
 		if tplChanged {
-			updated.Layout = resolved.Layout.Name
+			updated.Layout = newTemplate
 		}
 
 		if nameChanged {

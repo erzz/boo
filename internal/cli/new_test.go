@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/erzz/boo/internal/config"
@@ -335,5 +336,25 @@ func TestRunCreateProject_MaterialisedLayoutPersistsAndKeepsTemplateKey(t *testi
 	gotLeaves := layout.LeafPointers(&got.Tabs[0].Root)
 	if len(gotLeaves) == 0 || gotLeaves[0].Command != "echo customised" {
 		t.Errorf("persisted layout did not retain custom command; first leaf = %+v", gotLeaves[0])
+	}
+}
+
+func TestRunCreateProject_ResponsiveTemplatePrintsEditorSkippedNote(t *testing.T) {
+	a := makeAppForCmds(t)
+	a.Config = config.DefaultConfig()
+	responsive := []byte("name: responsive\nvariants:\n  - tabs:\n      - split:\n          cwd: .\n  - min_cols: 120\n    tabs:\n      - split:\n          direction: row\n          children:\n            - cwd: .\n            - cwd: logs\n")
+	if err := os.WriteFile(filepath.Join(a.Paths.LayoutsDir, "responsive.yaml"), responsive, 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	intent := picker.NewProjectIntent{
+		Name:     "resp",
+		Dir:      t.TempDir(),
+		Template: "responsive",
+	}
+	var out bytes.Buffer
+	_ = runCreateProject(context.Background(), a, intent, &out)
+	if !strings.Contains(out.String(), "layout editor is skipped") {
+		t.Fatalf("output = %q, want responsive editor-skip note", out.String())
 	}
 }

@@ -38,6 +38,17 @@ $EDITOR is required. $VISUAL is honoured if $EDITOR is unset.`,
 			if _, err := reg.Get(name); err != nil {
 				return err
 			}
+			p, err := reg.Get(name)
+			if err != nil {
+				return err
+			}
+			responsive, err := projectUsesResponsiveLayout(a, p)
+			if err != nil {
+				return err
+			}
+			if responsive {
+				return fmt.Errorf("project %q uses a responsive layout; editing responsive layouts is not supported yet", name)
+			}
 
 			path := a.Paths.ProjectLayoutFile(name)
 			if _, err := os.Stat(path); err != nil {
